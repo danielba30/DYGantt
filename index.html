@@ -97,14 +97,22 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
       <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
       <span class="hidden sm:inline">איפוס</span>
     </button>
+    <button id="btnChangePass" class="btn-ghost" title="שינוי סיסמת העריכה">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+    </button>
+    <button id="btnLock" class="btn-ghost" title="יציאה ממצב עריכה">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l-5-5 5-5M5 12h11"/></svg>
+    </button>
     </div>
   </header>
 
   <!-- View-only banner -->
   <section id="viewBanner" class="hidden items-center gap-2.5 mb-4 rounded-xl border border-indigo-200 bg-indigo-50 px-3.5 py-2.5">
     <svg class="w-4 h-4 text-indigo-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-    <span class="text-sm font-semibold text-indigo-900">תצוגה בלבד</span>
+    <span class="text-sm font-semibold text-indigo-900" id="viewTitle">תצוגה בלבד</span>
     <span class="text-xs text-indigo-700" id="viewMeta"></span>
+    <span class="flex-1"></span>
+    <button id="btnUnlock" class="hidden h-7 px-3 rounded-lg text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition shrink-0">כניסה לעריכה</button>
   </section>
 
   <!-- Save status -->
@@ -194,6 +202,43 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     </div>
   </section>
 
+</div>
+
+<!-- Login dialog -->
+<div id="loginModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+  <div class="w-full max-w-sm rounded-2xl bg-white shadow-2xl border border-slate-200 p-5">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="w-9 h-9 rounded-xl bg-slate-900 grid place-items-center shrink-0">
+        <svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+      </div>
+      <h3 class="text-base font-bold text-slate-900" id="loginTitle">כניסה לעריכה</h3>
+    </div>
+    <form id="loginForm" autocomplete="off">
+      <input id="loginPass" type="password" placeholder="סיסמה" autocomplete="current-password"
+             class="w-full h-10 px-3 rounded-lg border border-slate-200 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">
+      <p id="loginErr" class="hidden text-[11px] text-rose-600 mt-1.5">סיסמה שגויה</p>
+      <div class="flex justify-end gap-2 mt-4">
+        <button type="button" id="btnCloseLogin" class="btn-ghost">ביטול</button>
+        <button type="submit" class="btn-primary">כניסה</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Change password dialog -->
+<div id="passModal" class="hidden fixed inset-0 z-50 items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+  <div class="w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-slate-200 p-5">
+    <h3 class="text-base font-bold text-slate-900 mb-1">שינוי סיסמת העריכה</h3>
+    <p class="text-xs text-slate-500 mb-3">הסיסמה עצמה לא נשמרת בשום מקום — רק טביעת אצבע שלה. הקלידו סיסמה חדשה, העתיקו את השורה שתיווצר והחליפו בה את השורה המתאימה ב-<code class="bg-slate-100 px-1 rounded">index.html</code>, ואז פרסו מחדש.</p>
+    <input id="newPass" type="text" placeholder="סיסמה חדשה"
+           class="w-full h-10 px-3 rounded-lg border border-slate-200 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 mb-2">
+    <textarea id="passLine" readonly dir="ltr" rows="2"
+              class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-[11px] text-slate-600 outline-none resize-none"></textarea>
+    <div class="flex justify-end gap-2 mt-4">
+      <button id="btnCopyPassLine" class="btn-primary">העתקת השורה</button>
+      <button id="btnClosePass" class="btn-ghost">סגירה</button>
+    </div>
+  </div>
 </div>
 
 <!-- Share dialog -->
@@ -1732,14 +1777,114 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     document.body.classList.add("viewonly");
     hydrate(obj.data);
     const at = obj.at ? new Date(obj.at) : null;
+    $("viewTitle").textContent = "תצוגה בלבד";
     $("viewMeta").textContent = (state.name ? state.name + " · " : "") +
       (at && !isNaN(at) ? `עודכן ב-${at.getDate()}/${at.getMonth() + 1}/${at.getFullYear()}` : "");
-    const b = $("viewBanner");
-    b.classList.remove("hidden");
-    b.classList.add("flex");
+    showBanner();
     syncSettings();
     renderAll();
   }
+
+  function showBanner() {
+    const b = $("viewBanner");
+    b.classList.remove("hidden");
+    b.classList.add("flex");
+  }
+
+  /* ============ נעילת עריכה בסיסמה ============ */
+
+  /* טביעת האצבע של סיסמת העריכה. ברירת המחדל היא "dygantt" — החליפו אותה
+     דרך "שינוי סיסמה" שבתוך המערכת. הסיסמה עצמה לא מופיעה כאן.            */
+  const EDIT_HASH = "7d16a762892c4dc424011e9fc2487e9a2d86a890df422b4de2622d94aa605447";
+  const DEFAULT_HASH = "7d16a762892c4dc424011e9fc2487e9a2d86a890df422b4de2622d94aa605447";
+  const UNLOCK_KEY = STORE + "-unlocked";
+
+  async function sha256(text) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  const cryptoOK = () => !!(window.crypto && crypto.subtle && typeof crypto.subtle.digest === "function");
+
+  function isUnlocked() {
+    try { return localStorage.getItem(UNLOCK_KEY) === EDIT_HASH; } catch (e) { return false; }
+  }
+
+  function enterLockedMode() {
+    viewOnly = true;
+    document.body.classList.add("viewonly");
+    $("viewTitle").textContent = "מצב צפייה";
+    $("viewMeta").textContent = "נדרשת סיסמה כדי לערוך";
+    $("btnUnlock").classList.remove("hidden");
+    showBanner();
+  }
+
+  function unlockNow(remember) {
+    viewOnly = false;
+    document.body.classList.remove("viewonly");
+    $("viewBanner").classList.add("hidden");
+    $("viewBanner").classList.remove("flex");
+    if (remember) { try { localStorage.setItem(UNLOCK_KEY, EDIT_HASH); } catch (e) {} }
+    document.querySelectorAll("#app input, #app select, #app textarea").forEach(el => {
+      el.removeAttribute("readonly"); el.style.pointerEvents = ""; el.tabIndex = 0;
+    });
+    syncSettings();
+    renderAll();
+    updateSaveBar();
+    if (EDIT_HASH === DEFAULT_HASH) toast('הסיסמה עדיין ברירת המחדל — כדאי לשנות אותה דרך "שינוי סיסמה"');
+  }
+
+  const loginModal = () => $("loginModal");
+  function openLogin() {
+    $("loginPass").value = "";
+    $("loginErr").classList.add("hidden");
+    loginModal().classList.remove("hidden");
+    loginModal().classList.add("flex");
+    setTimeout(() => $("loginPass").focus(), 30);
+  }
+  const closeLogin = () => { loginModal().classList.add("hidden"); loginModal().classList.remove("flex"); };
+
+  $("btnUnlock").addEventListener("click", openLogin);
+  $("btnCloseLogin").addEventListener("click", closeLogin);
+  loginModal().addEventListener("click", e => { if (e.target === loginModal()) closeLogin(); });
+
+  $("loginForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const ok = await sha256($("loginPass").value) === EDIT_HASH;
+    if (!ok) { $("loginErr").classList.remove("hidden"); $("loginPass").select(); return; }
+    closeLogin();
+    unlockNow(true);
+    toast("מצב עריכה פעיל");
+  });
+
+  /* --- שינוי סיסמה (זמין רק כשפתוח במצב עריכה) --- */
+  const passModal = () => $("passModal");
+  $("btnLock").addEventListener("click", () => {
+    try { localStorage.removeItem(UNLOCK_KEY); } catch (e) {}
+    location.reload();
+  });
+  $("btnChangePass").addEventListener("click", () => {
+    $("newPass").value = ""; $("passLine").value = "";
+    passModal().classList.remove("hidden"); passModal().classList.add("flex");
+    setTimeout(() => $("newPass").focus(), 30);
+  });
+  $("newPass").addEventListener("input", async e => {
+    const v = e.target.value;
+    $("passLine").value = v ? `  const EDIT_HASH = "${await sha256(v)}";` : "";
+  });
+  $("btnCopyPassLine").addEventListener("click", async () => {
+    const t = $("passLine");
+    if (!t.value) { toast("הקלידו סיסמה חדשה", true); return; }
+    t.select();
+    try { await navigator.clipboard.writeText(t.value); toast("השורה הועתקה — הדביקו אותה ב-index.html ופרסו מחדש"); }
+    catch (e) { try { document.execCommand("copy"); toast("השורה הועתקה"); } catch (e2) { toast("סמנו והעתיקו ידנית", true); } }
+  });
+  $("btnClosePass").addEventListener("click", () => { passModal().classList.add("hidden"); passModal().classList.remove("flex"); });
+  passModal().addEventListener("click", e => {
+    if (e.target === passModal()) { passModal().classList.add("hidden"); passModal().classList.remove("flex"); }
+  });
+
+  /* מעבר בין קישור שיתוף לכתובת הרגילה הוא ניווט באותו דף — צריך אתחול מחדש */
+  window.addEventListener("hashchange", () => location.reload());
 
   /* ---------- init ---------- */
   (async function boot() {
@@ -1755,6 +1900,11 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
         return;
       }
     }
+
+    /* ללא crypto.subtle (למשל פתיחה מקומית מ-file://) אין נעילה — זה המחשב של הבעלים */
+    const locked = cryptoOK() && !isUnlocked();
+    if (locked) enterLockedMode();
+
     load();
     syncSettings();
     renderAll();
