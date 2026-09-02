@@ -125,6 +125,15 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     <button id="btnSaveFile" class="h-7 px-2.5 rounded-lg text-xs font-medium bg-slate-900 text-white hover:bg-slate-800 transition">שמירה לקובץ</button>
   </section>
 
+  <!-- Projects -->
+  <section id="projectBar" class="hide-view flex flex-wrap items-center gap-2 mb-4">
+    <div id="projectTabs" class="flex flex-wrap items-center gap-1.5"></div>
+    <button id="btnNewProject" class="h-8 px-2.5 rounded-lg text-xs font-medium bg-white border border-dashed border-slate-300 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition">＋ פרויקט חדש</button>
+    <span class="flex-1"></span>
+    <button id="btnDupProject" class="h-8 px-2.5 rounded-lg text-xs font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition" title="שכפול הפרויקט הפעיל">שכפול</button>
+    <button id="btnDelProject" class="h-8 px-2.5 rounded-lg text-xs font-medium bg-white border border-slate-200 text-slate-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition" title="מחיקת הפרויקט הפעיל">מחיקה</button>
+  </section>
+
   <!-- Settings -->
   <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-4 sm:p-5 mb-4">
     <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
@@ -363,25 +372,78 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     };
   }
 
+  /* ---------- ריבוי פרויקטים ---------- */
+  /* workspace = { v:2, activeId, projects:[ {id, updatedAt, ...פרויקט} ] }
+     state תמיד מצביע על הפרויקט הפעיל, כך ששאר הקוד לא משתנה.            */
+  let workspace = null;
+  let pseq = 1;
+
+  const newProjectId = () => "p" + (pseq++) + "-" + Math.random().toString(36).slice(2, 7);
+
+  function newProject(name, blank) {
+    const p = defaults();
+    p.id = newProjectId();
+    p.name = name || "פרויקט חדש";
+    p.updatedAt = new Date().toISOString();
+    if (blank) p.tasks = [];
+    return p;
+  }
+
+  /** מנרמל פרויקט בודד שנטען מאחסון או מקובץ */
+  function fixProject(p) {
+    const out = Object.assign(defaults(), p);
+    if (!out.id) out.id = newProjectId();
+    const prev = state;
+    state = out;                                   // owners()/defOwner() נשענים על state
+    let s = 1;
+    out.tasks.forEach(t => {
+      if (!owners().includes(t.owner)) t.owner = defOwner();
+      if (typeof t.note !== "string") t.note = "";
+      const n = parseInt(String(t.id).replace(/\D/g, ""), 10);
+      if (n >= s) s = n + 1;
+    });
+    state = prev;
+    out._seq = s;
+    return out;
+  }
+
+  function activate(id) {
+    const p = workspace.projects.find(x => x.id === id) || workspace.projects[0];
+    workspace.activeId = p.id;
+    state = p;
+    seq = p._seq || 1;
+    if (!seq || seq < 1) seq = 1;
+    state.tasks.forEach(t => {
+      const n = parseInt(String(t.id).replace(/\D/g, ""), 10);
+      if (n >= seq) seq = n + 1;
+    });
+  }
+
+  /** בונה workspace מכל צורת נתונים — כולל הפורמט הישן של פרויקט בודד */
+  function toWorkspace(obj) {
+    if (obj && obj.v === 2 && Array.isArray(obj.projects) && obj.projects.length) {
+      const ws = { v: 2, activeId: obj.activeId, projects: obj.projects.map(fixProject) };
+      if (!ws.projects.some(p => p.id === ws.activeId)) ws.activeId = ws.projects[0].id;
+      return ws;
+    }
+    const single = obj && Array.isArray(obj.tasks) ? obj : null;      // פורמט ישן
+    if (!single) return null;
+    const p = fixProject(single);
+    return { v: 2, activeId: p.id, projects: [p] };
+  }
+
   function load() {
+    let ws = null;
     try {
       const raw = localStorage.getItem(STORE);
-      if (raw) {
-        const s = JSON.parse(raw);
-        if (s && Array.isArray(s.tasks)) {
-          state = Object.assign(defaults(), s);
-          state.tasks.forEach(t => {
-            if (!owners().includes(t.owner)) t.owner = defOwner();
-      if (typeof t.note !== "string") t.note = "";
-            const n = parseInt(String(t.id).replace(/\D/g, ""), 10);
-            if (n >= seq) seq = n + 1;
-          });
-          return;
-        }
-      }
+      if (raw) ws = toWorkspace(JSON.parse(raw));
     } catch (e) { /* ignore */ }
-    state = defaults();
-    seq = 4;
+    if (!ws) {
+      const p = fixProject(defaults());
+      ws = { v: 2, activeId: p.id, projects: [p] };
+    }
+    workspace = ws;
+    activate(ws.activeId);
   }
   /* בדיקה אמיתית שהדפדפן מרשה שמירה מקומית (על file:// זה לעיתים חסום) */
   let storageOK = false;
@@ -392,8 +454,10 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
   } catch (e) { storageOK = false; }
 
   const save = () => {
-    if (viewOnly) return;                       // בתצוגת לקוח לא דורסים את הפרויקט שלו
-    if (storageOK) { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { storageOK = false; } }
+    if (viewOnly || !workspace) return;         // בתצוגת לקוח לא דורסים את הפרויקט שלו
+    state.updatedAt = new Date().toISOString();
+    state._seq = seq;
+    if (storageOK) { try { localStorage.setItem(STORE, JSON.stringify(workspace)); } catch (e) { storageOK = false; } }
     queueFileSave();
   };
 
@@ -816,6 +880,33 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     sel.innerHTML = owners().map(o => `<option value="${esc(o)}" ${defOwner() === o ? "selected" : ""}>${esc(o)}</option>`).join("");
   }
 
+  /* ---------- rendering: לשוניות הפרויקטים ---------- */
+  function renderProjects() {
+    if (!workspace) return;
+    const tabs = $("projectTabs");
+    tabs.innerHTML = workspace.projects.map(p => {
+      const on = p.id === workspace.activeId;
+      const n = p.tasks.length;
+      return `<button data-act="proj" data-id="${p.id}" title="${esc(p.name || "ללא שם")} · ${n} משימות"
+        class="h-8 max-w-[200px] px-3 rounded-lg text-xs font-medium border transition truncate ${
+          on ? "bg-indigo-600 border-indigo-600 text-white shadow-sm shadow-indigo-200"
+             : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}">
+        ${esc(p.name || "ללא שם")}<span class="${on ? "text-indigo-200" : "text-slate-400"}"> · ${n}</span>
+      </button>`;
+    }).join("");
+    $("btnDelProject").disabled = workspace.projects.length <= 1;
+    $("btnDelProject").classList.toggle("opacity-40", workspace.projects.length <= 1);
+  }
+
+  /** מעבר לפרויקט אחר: שומרים את הנוכחי, מפעילים את החדש ומרעננים הכל */
+  function switchTo(id) {
+    if (!workspace || id === workspace.activeId) return;
+    save();
+    activate(id);
+    syncSettings();
+    renderAll();
+  }
+
   /* ---------- rendering: holidays ---------- */
   const holDateTxt = k => { const d = parseKey(k); return `${d.getDate()}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`; };
   const holDays = h => Math.round((parseKey(h.to) - parseKey(h.from)) / 86400000) + 1;
@@ -853,6 +944,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     renderTimeline(sch, cal);
     renderOwners();
     renderHolidays();
+    renderProjects();
     save();
   }
 
@@ -881,7 +973,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     $("hpdWrap").style.visibility = state.unit === "hours" ? "visible" : "hidden";
   }
 
-  $("pName").addEventListener("input", e => { state.name = e.target.value; save(); });
+  $("pName").addEventListener("input", e => { state.name = e.target.value; renderProjects(); save(); });
   $("pStart").addEventListener("change", e => {
     if (e.target.value) { state.startDate = e.target.value; renderAll(); }
   });
@@ -955,9 +1047,54 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     renderAll();
   });
   $("btnReset").addEventListener("click", () => {
-    if (confirm("לאפס את הפרויקט ולמחוק את כל המשימות?")) {
-      state = defaults(); seq = 4; syncSettings(); renderAll();
-    }
+    if (!confirm(`לאפס את "${state.name || "הפרויקט"}" ולמחוק את כל המשימות שבו?`)) return;
+    const fresh = fixProject(defaults());
+    fresh.id = state.id;
+    fresh.name = state.name;
+    workspace.projects[workspace.projects.indexOf(state)] = fresh;
+    activate(fresh.id);
+    syncSettings();
+    renderAll();
+  });
+
+  /* --- ניהול פרויקטים --- */
+  $("btnNewProject").addEventListener("click", () => {
+    save();
+    let n = workspace.projects.length + 1, name = `פרויקט ${n}`;
+    while (workspace.projects.some(p => p.name === name)) name = `פרויקט ${++n}`;
+    const p = fixProject(newProject(name, true));
+    workspace.projects.push(p);
+    activate(p.id);
+    syncSettings();
+    renderAll();
+    $("pName").focus();
+    $("pName").select();
+  });
+
+  $("btnDupProject").addEventListener("click", () => {
+    save();
+    const copy = fixProject(JSON.parse(JSON.stringify(state)));
+    copy.id = newProjectId();
+    let base = (state.name || "פרויקט") + " — עותק", name = base, k = 2;
+    while (workspace.projects.some(p => p.name === name)) name = `${base} ${k++}`;
+    copy.name = name;
+    workspace.projects.splice(workspace.projects.indexOf(state) + 1, 0, copy);
+    activate(copy.id);
+    syncSettings();
+    renderAll();
+    toast(`נוצר עותק: "${name}"`);
+  });
+
+  $("btnDelProject").addEventListener("click", () => {
+    if (workspace.projects.length <= 1) return;
+    const name = state.name || "הפרויקט";
+    if (!confirm(`למחוק את "${name}" על כל ${state.tasks.length} המשימות שבו? הפעולה אינה הפיכה.`)) return;
+    const i = workspace.projects.indexOf(state);
+    workspace.projects.splice(i, 1);
+    activate(workspace.projects[Math.max(0, i - 1)].id);
+    syncSettings();
+    renderAll();
+    toast(`"${name}" נמחק`);
   });
 
   /* ---------- delegated events ---------- */
@@ -990,6 +1127,8 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
       if (state.tasks.length) state.tasks[0].dep = null;
       renderAll();
     }
+
+    if (act === "proj") { switchTo(btn.dataset.id); return; }
 
     if (act === "delowner") {
       const i = Number(btn.dataset.i);
@@ -1538,6 +1677,10 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     const next = rowsToState(rows);
     if (state.tasks.length && !confirm(`נמצאו ${next.tasks.length} משימות. הייבוא יחליף את ${state.tasks.length} המשימות הקיימות. להמשיך?`)) return null;
 
+    next.id = state.id;
+    next.name = state.name;
+    workspace.projects[workspace.projects.indexOf(state)] = next;
+    workspace.activeId = next.id;
     state = next;
     const idMap = {};
     seq = 1;
@@ -1567,30 +1710,32 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
   const hasFSA = typeof window.showSaveFilePicker === "function";
   let fileHandle = null, fileName = "", lastSaved = null, saveTimer = null, loading = false, fsaBroken = false;
 
-  function stateJson() { return JSON.stringify({ v: 1, app: "mini-gantt", data: state }, null, 2); }
+  /* הקובץ מחזיק את כל הפרויקטים, כדי ששמירה אוטומטית תשמור את כל העבודה */
+  function stateJson() {
+    state.updatedAt = new Date().toISOString();
+    state._seq = seq;
+    return JSON.stringify({ v: 2, app: "mini-gantt", data: workspace }, null, 2);
+  }
 
   function applyJson(text) {
     let obj;
     try { obj = JSON.parse(text); } catch (e) { throw new Error("הקובץ אינו קובץ פרויקט תקין"); }
-    const d = obj && obj.data ? obj.data : obj;
-    if (!d || !Array.isArray(d.tasks)) throw new Error("הקובץ אינו קובץ פרויקט תקין");
+    const ws = toWorkspace(obj && obj.data ? obj.data : obj);
+    if (!ws) throw new Error("הקובץ אינו קובץ פרויקט תקין");
     loading = true;
-    hydrate(d);
+    workspace = ws;
+    activate(ws.activeId);
     syncSettings();
     renderAll();
     loading = false;
+    return ws.projects.length;
   }
 
-  /** טוען אובייקט פרויקט לתוך המצב ומנרמל שדות חסרים (ללא רינדור) */
+  /** טוען פרויקט בודד (קישור שיתוף) לתוך המצב, ללא רינדור */
   function hydrate(d) {
-    state = Object.assign(defaults(), d);
-    seq = 1;
-    state.tasks.forEach(t => {
-      if (!owners().includes(t.owner)) t.owner = defOwner();
-      if (typeof t.note !== "string") t.note = "";
-      const n = parseInt(String(t.id).replace(/\D/g, ""), 10);
-      if (n >= seq) seq = n + 1;
-    });
+    const p = fixProject(d);
+    workspace = { v: 2, activeId: p.id, projects: [p] };
+    activate(p.id);
   }
 
   async function writeToFile() {
@@ -1669,10 +1814,10 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
         types: [{ description: "פרויקט מיני גאנט", accept: { "application/json": [".json", ".gantt"] } }]
       });
       const f = await h.getFile();
-      applyJson(await f.text());
+      const c1 = applyJson(await f.text());
       fileHandle = h; fileName = h.name; lastSaved = new Date();
       updateSaveBar();
-      toast(`הפרויקט נטען מ-"${h.name}" — כל שינוי יישמר אליו אוטומטית`);
+      toast(`נטענו ${c1} פרויקטים מ-"${h.name}" — כל שינוי יישמר אליו אוטומטית`);
     } catch (err) {
       if (err && err.name === "AbortError") return;
       if (err && err.message && !/picker/i.test(err.message)) { toast(err.message, true); return; }
@@ -1686,8 +1831,8 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     e.target.value = "";
     if (!f) return;
     try {
-      applyJson(await f.text());
-      toast(`הפרויקט נטען מ-"${f.name}" — לשמירה לחצו "שמירה לקובץ"`);
+      const c2 = applyJson(await f.text());
+      toast(`נטענו ${c2} פרויקטים מ-"${f.name}" — לשמירה לחצו "שמירה לקובץ"`);
     } catch (err) { toast(err.message || "שגיאה בקריאת הקובץ", true); }
   });
 
@@ -1715,7 +1860,8 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
   };
 
   async function encodeShare() {
-    const raw = new TextEncoder().encode(JSON.stringify({ v: 1, app: "mini-gantt", at: new Date().toISOString(), data: state }));
+    const one = Object.assign({}, state); delete one._seq;      // הקישור נושא רק את הפרויקט הפעיל
+    const raw = new TextEncoder().encode(JSON.stringify({ v: 1, app: "mini-gantt", at: new Date().toISOString(), data: one }));
     if (typeof CompressionStream === "function") {
       const cs = new Blob([raw]).stream().pipeThrough(new CompressionStream("deflate-raw"));
       return "z" + b64u.enc(new Uint8Array(await new Response(cs).arrayBuffer()));
