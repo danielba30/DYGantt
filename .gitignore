@@ -1,0 +1,8 @@
+# OneDrive / Windows
+*.tmp
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# project data files
+*.gantt.json

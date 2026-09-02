@@ -1,0 +1,1590 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>מיני גאנט — ניהול לוחות זמנים</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui','sans-serif'] } } } };
+</script>
+<style type="text/tailwindcss">
+  @layer base {
+    body { @apply bg-slate-50 text-slate-800 font-sans antialiased; }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+    input[type="number"] { -moz-appearance:textfield; }
+  }
+  @layer components {
+    .lbl { @apply block text-[11px] font-medium text-slate-500 mb-1; }
+    .inp { @apply w-full h-9 px-2.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-800
+                  outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100; }
+    .cell-inp { @apply w-full h-8 px-2 rounded-md border border-transparent bg-transparent text-sm
+                  outline-none transition hover:border-slate-200 focus:bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100; }
+    .owner-inp { @apply w-full h-8 px-1.5 rounded-md border text-xs font-medium
+                  outline-none cursor-pointer transition focus:ring-2 focus:ring-indigo-100; }
+    .btn { @apply h-9 px-3.5 rounded-lg text-sm font-medium transition inline-flex items-center gap-1.5; }
+    .btn-primary { @apply btn bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm shadow-indigo-200; }
+    .btn-ghost { @apply btn text-slate-600 hover:bg-slate-100 border border-slate-200 bg-white; }
+    .chip { @apply inline-flex items-center gap-1.5 h-8 pr-2.5 pl-1.5 rounded-full bg-slate-100 border border-slate-200 text-xs text-slate-600; }
+    .stat { @apply flex-1 min-w-[130px] rounded-xl bg-white border border-slate-200 px-3.5 py-2.5; }
+  }
+</style>
+<style>
+  .trow { display:grid; grid-template-columns: var(--tcols); align-items:center; }
+  .tbl-pane { width: var(--tw, 780px); }
+  @media (max-width: 767px) {
+    .trow { grid-template-columns: var(--tcols-sm); }
+    .tbl-pane { width: 366px; }
+    .col-note, .col-dates { display:none !important; }
+  }
+  /* ידיות לגרירת רוחב וסידור עמודות */
+  .thead-cell { position:relative; }
+  .thead-cell[draggable="true"] { cursor:grab; }
+  .thead-cell.col-drop { background:#eef2ff; }
+  .col-grip { position:absolute; top:0; bottom:0; inset-inline-end:-4px; width:9px; cursor:col-resize; z-index:5; }
+  .col-grip::after { content:""; position:absolute; top:14px; bottom:14px; inset-inline-end:4px; width:2px; border-radius:2px; background:#94a3b8; opacity:0; transition:opacity .15s; }
+  .col-grip:hover::after { opacity:1; }
+  body.col-resizing { cursor:col-resize; user-select:none; }
+  body.col-resizing .col-grip::after { opacity:1; }
+  .board::-webkit-scrollbar { height:10px; width:10px; }
+  .board::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:99px; border:2px solid #fff; }
+  .board::-webkit-scrollbar-track { background:#fff; }
+  .row-hl { background-color: rgba(99,102,241,.06) !important; }
+  #timelinePane { cursor: grab; }
+  .board.dragging, .board.dragging #timelinePane { cursor: grabbing; user-select: none; }
+</style>
+</head>
+<body>
+
+<div id="app" class="max-w-[1700px] mx-auto p-3 sm:p-5 lg:p-7">
+
+  <!-- Header -->
+  <header class="flex items-center justify-between gap-3 mb-5">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-indigo-600 grid place-items-center shadow-sm shadow-indigo-200">
+        <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M4 6h10M4 12h16M4 18h7"/>
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-lg sm:text-xl font-bold text-slate-900 leading-tight">מיני גאנט</h1>
+        <p class="text-xs text-slate-500">פשטתי לך כמה שאפשר מקווה שלא תהרסי ...</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+    <input id="fileImport" type="file" accept=".xlsx,.xls,.xml,.csv,.txt" class="hidden">
+    <button id="btnImport" class="btn-ghost">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0L8 7m4-4 4 4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+      <span class="hidden sm:inline">ייבוא מאקסל</span>
+    </button>
+    <button id="btnExport" class="btn-primary">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+      <span class="hidden sm:inline">ייצוא לאקסל</span>
+    </button>
+    <button id="btnReset" class="btn-ghost">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      <span class="hidden sm:inline">איפוס</span>
+    </button>
+    </div>
+  </header>
+
+  <!-- Save status -->
+  <input id="fileJson" type="file" accept=".json,.gantt" class="hidden">
+  <section id="saveBar" class="flex flex-wrap items-center gap-2 mb-4 rounded-xl border px-3 py-2">
+    <span id="saveDot" class="w-2 h-2 rounded-full shrink-0"></span>
+    <span id="saveTxt" class="text-xs font-medium"></span>
+    <span class="flex-1"></span>
+    <button id="btnOpenFile" class="h-7 px-2.5 rounded-lg text-xs font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition">פתיחה מקובץ</button>
+    <button id="btnSaveFile" class="h-7 px-2.5 rounded-lg text-xs font-medium bg-slate-900 text-white hover:bg-slate-800 transition">שמירה לקובץ</button>
+  </section>
+
+  <!-- Settings -->
+  <section class="rounded-2xl bg-white border border-slate-200 shadow-sm p-4 sm:p-5 mb-4">
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+      <div class="col-span-2 lg:col-span-1">
+        <label class="lbl" for="pName">שם הפרויקט</label>
+        <input id="pName" type="text" class="inp" placeholder="פרויקט חדש">
+      </div>
+      <div>
+        <label class="lbl" for="pStart">תאריך התחלה</label>
+        <input id="pStart" type="date" class="inp">
+      </div>
+      <div>
+        <label class="lbl" for="pUnit">יחידת זמן</label>
+        <select id="pUnit" class="inp">
+          <option value="days">ימים</option>
+          <option value="hours">שעות</option>
+        </select>
+      </div>
+      <div id="hpdWrap">
+        <label class="lbl" for="pHpd">תקן שעות ליום עבודה</label>
+        <input id="pHpd" type="number" min="0.5" max="24" step="0.5" class="inp">
+      </div>
+      <div class="flex items-end">
+        <div class="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+          <div class="text-[11px] text-slate-500">שבוע עבודה</div>
+          <div class="text-sm font-medium text-slate-700">ראשון–חמישי</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-4 pt-4 border-t border-slate-100 grid lg:grid-cols-2 gap-5">
+      <div>
+        <label class="lbl">אפשרויות אחריות</label>
+        <div id="ownerList" class="flex flex-wrap gap-2 mb-2"></div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button id="btnAddOwner" class="h-8 px-2.5 rounded-lg text-xs font-medium bg-white border border-dashed border-slate-300 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition">＋ הוסף אפשרות</button>
+          <span class="text-[11px] text-slate-500">ברירת מחדל למשימה חדשה:</span>
+          <select id="defOwner" class="h-8 px-2 rounded-lg border border-slate-200 bg-white text-xs outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"></select>
+        </div>
+      </div>
+
+      <div class="lg:border-r lg:border-slate-100 lg:pr-5">
+        <label class="lbl">ימי חופשה</label>
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <div class="flex items-center gap-1.5">
+            <span class="text-[11px] text-slate-500">מ־</span>
+            <input id="holFrom" type="date" class="inp w-[150px]">
+            <span class="text-[11px] text-slate-500">עד</span>
+            <input id="holTo" type="date" class="inp w-[150px]" title="ריק = יום בודד">
+          </div>
+          <input id="holNote" type="text" class="inp w-[150px]" placeholder="הערה (למשל: סוכות)">
+          <button id="btnAddHol" class="btn-ghost">＋ הוסף</button>
+        </div>
+        <div id="holList" class="flex flex-wrap gap-2"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Summary -->
+  <section id="summary" class="flex flex-wrap gap-2 sm:gap-3 mb-4"></section>
+
+  <!-- Board -->
+  <section class="board relative overflow-auto max-h-[68vh] rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div class="flex min-w-max items-start">
+
+      <!-- Tasks table (right side) -->
+      <div id="tablePane" class="tbl-pane sticky right-0 z-20 shrink-0 bg-white border-l border-slate-200">
+        <div id="tableHead" class="trow sticky top-0 z-10 bg-slate-50/95 backdrop-blur border-b border-slate-200 text-[11px] font-semibold text-slate-500" style="height:60px"></div>
+        <div id="tableBody"></div>
+      </div>
+
+      <!-- Timeline (left side) -->
+      <div id="timelinePane" class="shrink-0 relative"></div>
+
+    </div>
+  </section>
+
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ---------- constants ---------- */
+  const DAY_W = 38, ROW_H = 44, HEAD_H = 60, STORE = "mini-gantt-v1";
+  const WD = ["א","ב","ג","ד","ה","ו","ש"];
+  const MONTHS = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
+
+  /* ---------- date helpers ---------- */
+  const pad = n => String(n).padStart(2, "0");
+  const key = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const parseKey = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+  const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const isWeekend = d => d.getDay() === 5 || d.getDay() === 6;   // שישי / שבת
+
+  /* ימי חופשה: כל פריט הוא טווח {from,to,note} — תאריך בודד הוא טווח שבו from===to */
+  function normHolidays() {
+    if (!Array.isArray(state.holidays)) return [];
+    return state.holidays.map(h => {
+      if (typeof h === "string") return { from: h, to: h, note: "" };
+      if (!h || !h.from) return null;
+      return { from: h.from, to: h.to || h.from, note: h.note || "" };
+    }).filter(Boolean).sort((a, b) => a.from < b.from ? -1 : a.from > b.from ? 1 : 0);
+  }
+
+  let _holKey = null, _holMap = new Map();
+  function holidayMap() {
+    const k = JSON.stringify(state.holidays);
+    if (k !== _holKey) {
+      _holKey = k;
+      _holMap = new Map();
+      normHolidays().forEach(h => {
+        let d = parseKey(h.from);
+        const end = parseKey(h.to);
+        for (let i = 0; i < 400 && d <= end; i++) { _holMap.set(key(d), h); d = addDays(d, 1); }
+      });
+    }
+    return _holMap;
+  }
+  const isHoliday = d => holidayMap().has(key(d));
+  const holidayAt = d => holidayMap().get(key(d)) || null;
+  const isWorking = d => !isWeekend(d) && !isHoliday(d);
+  const shortDate = d => `${d.getDate()}/${d.getMonth() + 1}`;
+  const todayKey = key(new Date());
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const num = n => { const v = Math.round(n * 100) / 100; return String(v); };
+
+  /* ---------- אחריות ---------- */
+  const PALETTE = [
+    { sel: "bg-indigo-50 border-indigo-200 text-indigo-700",   bar: "bg-indigo-500 shadow-indigo-200/70",   xls: { fill: "#6366F1", half: "#A5B4FC", tint: "#EEF2FF", text: "#4338CA" } },
+    { sel: "bg-amber-50 border-amber-200 text-amber-700",      bar: "bg-amber-500 shadow-amber-200/70",     xls: { fill: "#F59E0B", half: "#FCD34D", tint: "#FFFBEB", text: "#B45309" } },
+    { sel: "bg-emerald-50 border-emerald-200 text-emerald-700", bar: "bg-emerald-500 shadow-emerald-200/70", xls: { fill: "#10B981", half: "#6EE7B7", tint: "#ECFDF5", text: "#047857" } },
+    { sel: "bg-sky-50 border-sky-200 text-sky-700",            bar: "bg-sky-500 shadow-sky-200/70",         xls: { fill: "#0EA5E9", half: "#7DD3FC", tint: "#F0F9FF", text: "#0369A1" } },
+    { sel: "bg-rose-50 border-rose-200 text-rose-700",         bar: "bg-rose-500 shadow-rose-200/70",       xls: { fill: "#F43F5E", half: "#FDA4AF", tint: "#FFF1F2", text: "#BE123C" } },
+    { sel: "bg-violet-50 border-violet-200 text-violet-700",   bar: "bg-violet-500 shadow-violet-200/70",   xls: { fill: "#8B5CF6", half: "#C4B5FD", tint: "#F5F3FF", text: "#6D28D9" } },
+    { sel: "bg-teal-50 border-teal-200 text-teal-700",         bar: "bg-teal-500 shadow-teal-200/70",       xls: { fill: "#14B8A6", half: "#5EEAD4", tint: "#F0FDFA", text: "#0F766E" } },
+    { sel: "bg-orange-50 border-orange-200 text-orange-700",   bar: "bg-orange-500 shadow-orange-200/70",   xls: { fill: "#F97316", half: "#FDBA74", tint: "#FFF7ED", text: "#C2410C" } }
+  ];
+  const owners = () => (Array.isArray(state.owners) && state.owners.length ? state.owners : ["אלעד"]);
+  const defOwner = () => (owners().includes(state.defaultOwner) ? state.defaultOwner : owners()[0]);
+  const ownerOf = t => (owners().includes(t.owner) ? t.owner : defOwner());
+  const ownerIdx = o => { const i = owners().indexOf(o); return (i < 0 ? 0 : i) % PALETTE.length; };
+  const ownerCls = o => PALETTE[ownerIdx(o)].sel;
+  const ownerBar = o => PALETTE[ownerIdx(o)].bar;
+
+  /* ---------- state ---------- */
+  let state, seq = 1;
+
+  function defaults() {
+    return {
+      name: "פרויקט חדש",
+      startDate: key(new Date()),
+      unit: "days",
+      hoursPerDay: 8.5,
+      holidays: [],
+      owners: ["אלעד", "לקוח"],
+      defaultOwner: "אלעד",
+      colOrder: null,
+      colWidths: {},
+      tasks: [
+        { id: "t1", name: "אפיון ותכנון", owner: "אלעד", duration: 2, dep: null, note: "" },
+        { id: "t2", name: "פיתוח", owner: "אלעד", duration: 5, dep: "t1", note: "" },
+        { id: "t3", name: "בדיקות ומסירה", owner: "לקוח", duration: 1.5, dep: "t2", note: "" }
+      ]
+    };
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORE);
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s && Array.isArray(s.tasks)) {
+          state = Object.assign(defaults(), s);
+          state.tasks.forEach(t => {
+            if (!owners().includes(t.owner)) t.owner = defOwner();
+      if (typeof t.note !== "string") t.note = "";
+            const n = parseInt(String(t.id).replace(/\D/g, ""), 10);
+            if (n >= seq) seq = n + 1;
+          });
+          return;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    state = defaults();
+    seq = 4;
+  }
+  /* בדיקה אמיתית שהדפדפן מרשה שמירה מקומית (על file:// זה לעיתים חסום) */
+  let storageOK = false;
+  try {
+    localStorage.setItem(STORE + "-probe", "1");
+    storageOK = localStorage.getItem(STORE + "-probe") === "1";
+    localStorage.removeItem(STORE + "-probe");
+  } catch (e) { storageOK = false; }
+
+  const save = () => {
+    if (storageOK) { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch (e) { storageOK = false; } }
+    queueFileSave();
+  };
+
+  /* ---------- scheduling ---------- */
+  const hpd = () => (Number(state.hoursPerDay) > 0 ? Number(state.hoursPerDay) : 8.5);
+
+  function durDays(t) {
+    const v = Number(t.duration);
+    if (!isFinite(v) || v <= 0) return 0;
+    return state.unit === "hours" ? v / hpd() : v;
+  }
+
+  /** מחשב לכל משימה מיקום בציר "ימי עבודה" (אינדקסים רציפים של ימי עבודה בלבד).
+   *  משימה תלויה ממשיכה בדיוק מנקודת הסיום של קודמתה — כולל אמצע יום. */
+  const rnd6 = n => Math.round(n * 1e6) / 1e6;
+
+  function computeSchedule() {
+    const map = {};
+    state.tasks.forEach(t => {
+      const dd = durDays(t);
+      const s = rnd6(t.dep && map[t.dep] ? map[t.dep].end : 0);
+      const end = rnd6(s + dd);
+      const first = Math.floor(s + 1e-9);
+      map[t.id] = { s, end, dd, first, last: Math.max(first, Math.ceil(end - 1e-9) - 1) };
+    });
+    return map;
+  }
+
+  /** בונה את עמודות היומן: כל יום קלנדרי, עם סימון האם הוא יום עבודה ומהו אינדקס יום העבודה שלו */
+  function buildCalendar(neededWorkDays) {
+    const start = parseKey(state.startDate);
+    const cols = [];
+    const wiToCol = [];
+    let d = new Date(start), wi = 0, tail = 0;
+
+    for (let i = 0; i < 800; i++) {
+      const work = isWorking(d);
+      cols.push({ date: new Date(d), work, wi: work ? wi : null, k: key(d) });
+      if (work) { wiToCol[wi] = cols.length - 1; wi++; }
+      if (wi >= neededWorkDays) tail++;
+      if (tail >= 3 && cols.length >= 24) break;
+      d = addDays(d, 1);
+    }
+    return { cols, wiToCol };
+  }
+
+  /* ---------- rendering: summary ---------- */
+  function renderSummary(sch, cal) {
+    const ids = state.tasks.map(t => t.id);
+    const lastIdx = ids.length ? Math.max(...ids.map(i => sch[i].last)) : -1;
+    const firstIdx = ids.length ? Math.min(...ids.map(i => sch[i].first)) : -1;
+    const totalWork = ids.length ? Math.max(...ids.map(i => sch[i].end)) : 0;
+
+    const startWi = firstIdx >= 0 ? firstIdx : 0;
+    const startD = cal.wiToCol[startWi] != null ? cal.cols[cal.wiToCol[startWi]].date : null;
+    const endD = lastIdx >= 0 && cal.wiToCol[lastIdx] != null ? cal.cols[cal.wiToCol[lastIdx]].date : null;
+    const span = startD && endD ? Math.round((endD - startD) / 86400000) + 1 : 0;
+
+    const totalTxt = state.unit === "hours"
+      ? `${num(totalWork * hpd())} שעות`
+      : `${num(totalWork)} ימי עבודה`;
+
+    const item = (label, value, accent) => `
+      <div class="stat">
+        <div class="text-[11px] text-slate-500">${label}</div>
+        <div class="text-sm font-semibold ${accent || "text-slate-800"} mt-0.5">${value}</div>
+      </div>`;
+
+    // "התחלה בפועל" ניתן לעריכה — מזיז את כל הפרויקט ליום העבודה התקין הראשון מהתאריך שנבחר
+    const startEditor = `
+      <div class="stat !flex-none w-[190px]">
+        <div class="text-[11px] text-slate-500 flex items-center gap-1">
+          התחלה בפועל
+          <svg class="w-3 h-3 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        </div>
+        <div class="flex items-center gap-1.5 mt-0.5">
+          <span class="text-sm font-semibold text-slate-800 shrink-0">${startD ? WD[startD.getDay()] + "׳" : ""}</span>
+          <input id="actualStart" type="date" value="${startD ? key(startD) : state.startDate}"
+            class="flex-1 min-w-0 bg-transparent text-sm font-semibold text-slate-800 tabular-nums outline-none cursor-pointer
+                   rounded px-1 -mx-1 hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-100">
+        </div>
+      </div>`;
+
+    document.getElementById("summary").innerHTML =
+      startEditor +
+      item("סיום מתוכנן", endD ? `${WD[endD.getDay()]}׳ ${shortDate(endD)}` : "—", "text-indigo-600") +
+      item("משך כולל", totalTxt) +
+      item("ימים קלנדריים", span ? `${span} ימים` : "—") +
+      item("משימות", `${state.tasks.length}`);
+  }
+
+  /* ---------- עמודות הטבלה: סדר ורוחב ניתנים לגרירה ---------- */
+  const COLDEFS = [
+    { key: "idx",   label: "#",       w: 40,  min: 30,  sm: "28px",                fixed: true, resize: false },
+    { key: "name",  label: "משימה",   w: 160, min: 90,  sm: "minmax(88px,1fr)" },
+    { key: "owner", label: "אחריות",  w: 96,  min: 70,  sm: "74px" },
+    { key: "dur",   label: "משך",     w: 84,  min: 58,  sm: "58px" },
+    { key: "dep",   label: "תלוי ב־", w: 122, min: 80,  sm: "88px" },
+    { key: "note",  label: "הערות",   w: 150, min: 80,  sm: null },
+    { key: "dates", label: "תאריכים", w: 112, min: 84,  sm: null },
+    { key: "act",   label: "",        w: 36,  min: 36,  sm: "30px",                fixed: true, resize: false }
+  ];
+  const DEF_ORDER = COLDEFS.filter(c => !c.fixed).map(c => c.key);
+  const colDef = k => COLDEFS.find(c => c.key === k);
+
+  function colOrder() {
+    const saved = Array.isArray(state.colOrder) ? state.colOrder.filter(k => DEF_ORDER.includes(k)) : [];
+    return [...new Set(saved)].concat(DEF_ORDER.filter(k => !saved.includes(k)));
+  }
+  const colW = k => {
+    const d = colDef(k);
+    const v = state.colWidths && Number(state.colWidths[k]);
+    return Math.max(d.min, isFinite(v) && v > 0 ? v : d.w);
+  };
+  const visibleCols = () => [colDef("idx"), ...colOrder().map(colDef), colDef("act")];
+
+  function applyColumnLayout() {
+    const vis = visibleCols();
+    const pane = document.getElementById("tablePane");
+    pane.style.setProperty("--tcols", vis.map(c => colW(c.key) + "px").join(" "));
+    pane.style.setProperty("--tcols-sm", vis.filter(c => c.sm).map(c => c.sm).join(" "));
+    pane.style.setProperty("--tw", vis.reduce((a, c) => a + colW(c.key), 0) + "px");
+  }
+
+  /* --- שינוי רוחב בגרירת הידית --- */
+  (function enableColResize() {
+    let key = null, startX = 0, startW = 0, head = null;
+    document.addEventListener("pointerdown", e => {
+      const grip = e.target.closest(".col-grip");
+      if (!grip) return;
+      key = grip.dataset.grip;
+      startX = e.clientX;
+      startW = colW(key);
+      head = grip.closest(".thead-cell");
+      if (head) head.draggable = false;                 // שלא יתחיל גם סידור מחדש
+      document.body.classList.add("col-resizing");
+      grip.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    document.addEventListener("pointermove", e => {
+      if (!key) return;
+      const d = colDef(key);
+      state.colWidths = state.colWidths || {};
+      state.colWidths[key] = Math.max(d.min, Math.round(startW - (e.clientX - startX)));   // RTL: שמאלה = רחב יותר
+      applyColumnLayout();
+    });
+    const stop = () => {
+      if (!key) return;
+      key = null;
+      if (head) { head.draggable = true; head = null; }
+      document.body.classList.remove("col-resizing");
+      save();
+    };
+    ["pointerup", "pointercancel", "lostpointercapture"].forEach(ev => document.addEventListener(ev, stop));
+  })();
+
+  /* --- סידור מחדש בגרירת הכותרת --- */
+  (function enableColReorder() {
+    const headEl = () => document.getElementById("tableHead");
+    let dragKey = null;
+
+    document.addEventListener("dragstart", e => {
+      const cell = e.target.closest && e.target.closest(".thead-cell[draggable='true']");
+      if (!cell) return;
+      dragKey = cell.dataset.colkey;
+      e.dataTransfer.effectAllowed = "move";
+      try { e.dataTransfer.setData("text/plain", dragKey); } catch (err) {}
+    });
+
+    document.addEventListener("dragover", e => {
+      if (!dragKey) return;
+      const cell = e.target.closest && e.target.closest(".thead-cell[draggable='true']");
+      if (!cell) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      headEl().querySelectorAll(".col-drop").forEach(x => x.classList.remove("col-drop"));
+      if (cell.dataset.colkey !== dragKey) cell.classList.add("col-drop");
+    });
+
+    document.addEventListener("drop", e => {
+      if (!dragKey) return;
+      const cell = e.target.closest && e.target.closest(".thead-cell[draggable='true']");
+      if (cell && cell.dataset.colkey !== dragKey) {
+        e.preventDefault();
+        const order = colOrder().filter(k => k !== dragKey);
+        const at = order.indexOf(cell.dataset.colkey);
+        order.splice(at < 0 ? order.length : at, 0, dragKey);
+        state.colOrder = order;
+        renderAll();
+      }
+      dragKey = null;
+    });
+
+    document.addEventListener("dragend", () => {
+      dragKey = null;
+      const h = headEl();
+      if (h) h.querySelectorAll(".col-drop").forEach(x => x.classList.remove("col-drop"));
+    });
+  })();
+
+  /* ---------- rendering: table ---------- */
+  function datesHtml(id, sch, cal) {
+    const s = sch[id];
+    if (!s || s.dd <= 0) return `<span class="text-slate-300">—</span>`;
+    const a = cal.cols[cal.wiToCol[s.first]], b = cal.cols[cal.wiToCol[s.last]];
+    if (!a || !b) return `<span class="text-slate-300">—</span>`;
+    return `<div class="flex items-center gap-1 text-[11px] text-slate-500 tabular-nums">
+        <span>${shortDate(a.date)}</span><span class="text-slate-300">–</span><span>${shortDate(b.date)}</span>
+      </div>`;
+  }
+
+  function renderTable(sch, cal) {
+    const body = document.getElementById("tableBody");
+    const vis = visibleCols();
+
+    /* --- כותרות: ניתנות לגרירה לסידור מחדש, עם ידית לשינוי רוחב --- */
+    document.getElementById("tableHead").innerHTML = vis.map(c => {
+      const label = c.key === "dur" ? (state.unit === "hours" ? "משך (ש׳)" : "משך (ימים)") : c.label;
+      const move = !c.fixed;
+      return `<div class="thead-cell col-${c.key} ${c.key === "idx" ? "text-center" : "px-2"}"
+                data-colkey="${c.key}" ${move ? 'draggable="true" title="גררו כדי לשנות את סדר העמודות"' : ""}>
+                <span class="block truncate pointer-events-none">${esc(label)}</span>
+                ${c.resize === false ? "" : `<span class="col-grip" data-grip="${c.key}" title="גררו כדי לשנות רוחב"></span>`}
+              </div>`;
+    }).join("");
+
+    let html = "";
+    if (!state.tasks.length) {
+      html += `<div class="h-[44px] flex items-center justify-center text-xs text-slate-400 border-b border-slate-100">אין משימות — התחילו בהוספת משימה</div>`;
+    }
+
+    state.tasks.forEach((t, i) => {
+      let opts = `<option value="">ללא תלות</option>`;
+      state.tasks.slice(0, i).forEach((p, j) => {
+        opts += `<option value="${p.id}" ${t.dep === p.id ? "selected" : ""}>${j + 1}. ${esc(p.name || "משימה")}</option>`;
+      });
+
+      const cells = {
+        idx: `<div class="col-idx text-center text-xs font-medium text-slate-400 tabular-nums">${i + 1}</div>`,
+        name: `<div class="col-name px-1"><input type="text" class="cell-inp font-medium" data-f="name" data-id="${t.id}" value="${esc(t.name)}" placeholder="שם המשימה"></div>`,
+        owner: `<div class="col-owner px-1">
+            <select class="owner-inp ${ownerCls(ownerOf(t))}" data-f="owner" data-id="${t.id}">
+              ${owners().map(o => `<option value="${esc(o)}" ${ownerOf(t) === o ? "selected" : ""}>${esc(o)}</option>`).join("")}
+            </select>
+          </div>`,
+        dur: `<div class="col-dur px-1"><input type="number" class="cell-inp text-center tabular-nums" data-f="dur" data-id="${t.id}" value="${esc(t.duration)}" step="0.5" min="0.5"></div>`,
+        dep: `<div class="col-dep px-1">
+            <select class="cell-inp text-xs ${i === 0 ? "text-slate-400" : ""}" data-f="dep" data-id="${t.id}" ${i === 0 ? "disabled" : ""}>${opts}</select>
+          </div>`,
+        note: `<div class="col-note px-1">
+            <input type="text" class="cell-inp text-xs text-slate-600" data-f="note" data-id="${t.id}"
+                   value="${esc(t.note || "")}" placeholder="הערה…" title="${esc(t.note || "")}">
+          </div>`,
+        dates: `<div class="col-dates px-2" data-dates="${t.id}">${datesHtml(t.id, sch, cal)}</div>`,
+        act: `<div class="col-act grid place-items-center">
+            <button data-act="del" data-id="${t.id}" title="מחיקה"
+              class="w-7 h-7 rounded-md grid place-items-center text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>
+            </button>
+          </div>`
+      };
+
+      html += `<div class="trow border-b border-slate-100 hover:bg-slate-50/70" data-row="${i}" style="height:${ROW_H}px">${
+        vis.map(c => cells[c.key]).join("")}</div>`;
+    });
+
+    html += `
+      <div class="trow border-b border-slate-100" style="height:${ROW_H}px">
+        <div></div>
+        <div class="px-1" style="grid-column: 2 / -1">
+          <button data-act="add" class="h-8 w-full rounded-md border border-dashed border-slate-300 text-xs font-medium text-slate-500 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50/50 transition">
+            ＋ הוספת משימה
+          </button>
+        </div>
+      </div>`;
+
+    body.innerHTML = html;
+  }
+
+  /* טולטיפ לפס בגאנט: שם המשימה + ההערה */
+  const barTip = t => [t.name || "משימה", t.note].filter(x => x && String(x).trim()).join(" — ");
+  function updateBarTitle(t) {
+    const tip = barTip(t);
+    document.querySelectorAll(`[data-bar="${t.id}"]`).forEach(b => { b.title = tip; });
+  }
+
+  /* ---------- rendering: timeline ---------- */
+  function renderTimeline(sch, cal) {
+    const pane = document.getElementById("timelinePane");
+    const cols = cal.cols, W = cols.length * DAY_W;
+    const rows = state.tasks.length + 1;   // +1 עבור שורת "הוספת משימה"
+
+    /* --- header: month band --- */
+    let months = "", i = 0;
+    while (i < cols.length) {
+      const d = cols[i].date, m = d.getMonth(), y = d.getFullYear();
+      let n = 0;
+      while (i + n < cols.length && cols[i + n].date.getMonth() === m && cols[i + n].date.getFullYear() === y) n++;
+      months += `<div class="shrink-0 h-6 flex items-center justify-center text-[11px] font-semibold text-slate-500 border-l border-slate-200 bg-slate-50"
+                   style="width:${n * DAY_W}px">${MONTHS[m]} ${y}</div>`;
+      i += n;
+    }
+
+    /* --- header: days --- */
+    let days = "";
+    cols.forEach(c => {
+      const isToday = c.k === todayKey;
+      const tone = isToday ? "text-indigo-600" : c.work ? "text-slate-700" : "text-slate-300";
+      const hol = holidayAt(c.date);
+      const tip = hol ? `חופשה${hol.note ? " — " + hol.note : ""}` : "";
+      days += `<div title="${esc(tip)}" class="shrink-0 h-9 flex flex-col items-center justify-center gap-px border-l border-slate-100 ${c.work ? "" : "bg-slate-100/70"} ${hol ? "bg-slate-200/80" : ""} ${isToday ? "bg-indigo-50" : ""}"
+                 style="width:${DAY_W}px">
+                 <span class="text-[10px] leading-none ${c.work ? "text-slate-400" : "text-slate-300"}">${WD[c.date.getDay()]}</span>
+                 <span class="text-xs leading-none font-semibold tabular-nums ${tone}">${c.date.getDate()}</span>
+               </div>`;
+    });
+
+    /* --- background layers --- */
+    let shade = "";
+    cols.forEach((c, idx) => {
+      if (c.work) return;
+      const hol = holidayAt(c.date);
+      shade += `<div title="${esc(hol ? "חופשה" + (hol.note ? " — " + hol.note : "") : "")}"
+                  class="absolute top-0 bottom-0 ${hol ? "bg-slate-200/70" : "bg-slate-100/70"}"
+                  style="inset-inline-start:${idx * DAY_W}px;width:${DAY_W}px"></div>`;
+    });
+    const todayCol = cols.findIndex(c => c.k === todayKey);
+    const todayLine = todayCol >= 0
+      ? `<div class="absolute top-0 bottom-0 w-px bg-indigo-400/70" style="inset-inline-start:${todayCol * DAY_W + DAY_W / 2}px"></div>` : "";
+
+    /* --- bars --- */
+    let rowsHtml = "";
+    state.tasks.forEach((t, ri) => {
+      const s = sch[t.id];
+      let bars = "";
+
+      if (s && s.dd > 0) {
+        // לכל יום עבודה: מאיזה חלק של היום המשימה מתחילה ועד איזה חלק היא נמשכת
+        const active = [];
+        for (let wi = s.first; wi < Math.ceil(s.end - 1e-9); wi++) {
+          const col = cal.wiToCol[wi];
+          if (col == null) break;
+          const a = Math.max(s.s, wi) - wi;
+          const b = Math.min(s.end, wi + 1) - wi;
+          if (b - a > 1e-4) active.push({ col, a, b });
+        }
+        // קיבוץ לרצפים (שישי/שבת/חופשה מפצלים את הפס)
+        const runs = [];
+        active.forEach(x => {
+          const last = runs[runs.length - 1];
+          if (last && x.col === last.c1 + 1) { last.c1 = x.col; last.b1 = x.b; }
+          else runs.push({ c0: x.col, c1: x.col, a0: x.a, b1: x.b });
+        });
+
+        const label = state.unit === "hours" ? `${num(Number(t.duration) || 0)} ש׳` : `${num(Number(t.duration) || 0)} י׳`;
+        const tip = barTip(t);
+        const spanOf = r => (r.c1 + r.b1) - (r.c0 + r.a0);
+        let widest = 0;
+        runs.forEach((r, k) => { if (spanOf(r) > spanOf(runs[widest])) widest = k; });
+
+        runs.forEach((r, k) => {
+          const left = (r.c0 + r.a0) * DAY_W;
+          const w = spanOf(r) * DAY_W;
+          const round = (k === 0 ? "rounded-s-md " : "") + (k === runs.length - 1 ? "rounded-e-md" : "");
+          const show = k === widest && w >= 42;
+          bars += `<div data-bar="${t.id}" title="${esc(tip)}"
+                     class="absolute top-1/2 -translate-y-1/2 h-[22px] ${ownerBar(ownerOf(t))} ${round} shadow-sm flex items-center justify-center overflow-hidden"
+                     style="inset-inline-start:${left}px;width:${Math.max(4, w - 2)}px">
+                     ${show ? `<span class="text-[10px] font-medium text-white/95 whitespace-nowrap px-1">${label}</span>` : ""}
+                   </div>`;
+        });
+      }
+
+      rowsHtml += `<div class="relative border-b border-slate-100" data-row="${ri}" style="height:${ROW_H}px">${bars}</div>`;
+    });
+    rowsHtml += `<div class="relative border-b border-slate-100" style="height:${ROW_H}px"></div>`;
+
+    pane.style.width = W + "px";
+    pane.innerHTML = `
+      <div class="sticky top-0 z-10 bg-white" style="height:${HEAD_H}px">
+        <div class="flex" style="width:${W}px">${months}</div>
+        <div class="flex border-b border-slate-200" style="width:${W}px">${days}</div>
+      </div>
+      <div class="relative" style="width:${W}px;height:${rows * ROW_H}px">
+        <div class="absolute inset-0">${shade}</div>
+        <div class="absolute inset-0 pointer-events-none"
+             style="background-image:repeating-linear-gradient(to left,#eef2f6 0 1px,transparent 1px ${DAY_W}px)"></div>
+        <div class="absolute inset-0 pointer-events-none">${todayLine}</div>
+        <div class="relative">${rowsHtml}</div>
+      </div>`;
+  }
+
+  /* ---------- rendering: אפשרויות אחריות ---------- */
+  function renderOwners() {
+    const list = $("ownerList");
+    list.innerHTML = owners().map((o, i) => `
+      <span class="inline-flex items-center gap-0.5 h-8 rounded-lg border ${PALETTE[i % PALETTE.length].sel} ps-1.5 pe-0.5">
+        <input data-owner="${i}" value="${esc(o)}" maxlength="20" size="1"
+               class="w-[84px] bg-transparent text-xs font-medium outline-none px-0.5" title="לחצו כדי לשנות את השם">
+        ${owners().length > 1 ? `<button data-act="delowner" data-i="${i}" title="הסרה"
+            class="w-5 h-5 rounded grid place-items-center text-xs opacity-50 hover:opacity-100 hover:bg-white/70 transition">✕</button>` : ""}
+      </span>`).join("");
+
+    const sel = $("defOwner");
+    sel.innerHTML = owners().map(o => `<option value="${esc(o)}" ${defOwner() === o ? "selected" : ""}>${esc(o)}</option>`).join("");
+  }
+
+  /* ---------- rendering: holidays ---------- */
+  const holDateTxt = k => { const d = parseKey(k); return `${d.getDate()}/${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`; };
+  const holDays = h => Math.round((parseKey(h.to) - parseKey(h.from)) / 86400000) + 1;
+
+  function renderHolidays() {
+    const list = document.getElementById("holList");
+    const hs = normHolidays();
+    if (!hs.length) {
+      list.innerHTML = `<span class="text-xs text-slate-400">לא הוגדרו ימי חופשה</span>`;
+      return;
+    }
+    list.innerHTML = hs.map((h, i) => {
+      const d = parseKey(h.from);
+      const span = h.from === h.to
+        ? `${WD[d.getDay()]}׳ ${holDateTxt(h.from)}`
+        : `${holDateTxt(h.from)} – ${holDateTxt(h.to)}`;
+      const days = h.from === h.to ? "" : `<span class="text-slate-400">(${holDays(h)} ימים)</span>`;
+      return `<span class="chip">
+        <span class="tabular-nums">${span}</span>
+        ${days}
+        ${h.note ? `<span class="text-slate-500 border-s border-slate-300 ps-1.5">${esc(h.note)}</span>` : ""}
+        <button data-act="delhol" data-i="${i}" class="w-5 h-5 rounded-full grid place-items-center text-slate-400 hover:text-rose-600 hover:bg-white transition">✕</button>
+      </span>`;
+    }).join("");
+  }
+
+  /* ---------- orchestration ---------- */
+  function renderAll() {
+    const sch = computeSchedule();
+    const maxLast = state.tasks.length ? Math.max(...state.tasks.map(t => sch[t.id].last)) : -1;
+    const cal = buildCalendar(maxLast + 1);
+    renderSummary(sch, cal);
+    applyColumnLayout();
+    renderTable(sch, cal);
+    renderTimeline(sch, cal);
+    renderOwners();
+    renderHolidays();
+    save();
+  }
+
+  /** רענון בלי לבנות מחדש את שדות הטבלה (שומר על הפוקוס בזמן הקלדה) */
+  function refresh() {
+    const sch = computeSchedule();
+    const maxLast = state.tasks.length ? Math.max(...state.tasks.map(t => sch[t.id].last)) : -1;
+    const cal = buildCalendar(maxLast + 1);
+    renderSummary(sch, cal);
+    renderTimeline(sch, cal);
+    state.tasks.forEach(t => {
+      const el = document.querySelector(`[data-dates="${t.id}"]`);
+      if (el) el.innerHTML = datesHtml(t.id, sch, cal);
+    });
+    save();
+  }
+
+  /* ---------- settings bindings ---------- */
+  const $ = id => document.getElementById(id);
+
+  function syncSettings() {
+    $("pName").value = state.name;
+    $("pStart").value = state.startDate;
+    $("pUnit").value = state.unit;
+    $("pHpd").value = state.hoursPerDay;
+    $("hpdWrap").style.visibility = state.unit === "hours" ? "visible" : "hidden";
+  }
+
+  $("pName").addEventListener("input", e => { state.name = e.target.value; save(); });
+  $("pStart").addEventListener("change", e => {
+    if (e.target.value) { state.startDate = e.target.value; renderAll(); }
+  });
+  $("pUnit").addEventListener("change", e => {
+    const to = e.target.value;
+    if (to !== state.unit) {
+      const f = to === "hours" ? hpd() : 1 / hpd();
+      state.tasks.forEach(t => { t.duration = Math.round((Number(t.duration) || 0) * f * 100) / 100; });
+      state.unit = to;
+    }
+    syncSettings();
+    renderAll();
+  });
+  $("pHpd").addEventListener("change", e => {
+    const v = Number(e.target.value);
+    state.hoursPerDay = isFinite(v) && v > 0 ? v : 8.5;
+    e.target.value = state.hoursPerDay;
+    renderAll();
+  });
+  /* עריכת "התחלה בפועל" מתוך סרגל הסיכום (מסונכרן עם תאריך ההתחלה בהגדרות) */
+  $("summary").addEventListener("change", e => {
+    if (e.target.id === "actualStart" && e.target.value) {
+      state.startDate = e.target.value;
+      syncSettings();
+      renderAll();
+    }
+  });
+  /* --- ניהול אפשרויות האחריות --- */
+  $("btnAddOwner").addEventListener("click", () => {
+    if (owners().length >= PALETTE.length) { toast(`אפשר עד ${PALETTE.length} אפשרויות אחריות`, true); return; }
+    let n = owners().length + 1, name = `אחריות ${n}`;
+    while (owners().includes(name)) name = `אחריות ${++n}`;
+    state.owners = owners().concat(name);
+    renderAll();
+    const inputs = $("ownerList").querySelectorAll("[data-owner]");
+    const last = inputs[inputs.length - 1];
+    if (last) { last.focus(); last.select(); }
+  });
+
+  $("defOwner").addEventListener("change", e => {
+    state.defaultOwner = e.target.value;
+    save();
+  });
+
+  $("ownerList").addEventListener("change", e => {
+    const el = e.target;
+    if (el.dataset.owner == null) return;
+    const i = Number(el.dataset.owner);
+    const old = owners()[i], name = el.value.trim();
+
+    if (!name || owners().some((o, j) => j !== i && o === name)) { renderOwners(); return; }   // ריק או כפול
+    const list = owners().slice();
+    list[i] = name;
+    state.owners = list;
+    state.tasks.forEach(t => { if (t.owner === old) t.owner = name; });
+    if (state.defaultOwner === old) state.defaultOwner = name;
+    renderAll();
+  });
+
+  $("ownerList").addEventListener("keydown", e => {
+    if (e.key === "Enter" && e.target.dataset.owner != null) e.target.blur();
+  });
+
+  $("btnAddHol").addEventListener("click", () => {
+    let from = $("holFrom").value, to = $("holTo").value || from;
+    const note = $("holNote").value.trim();
+    if (!from) { toast("בחרו תאריך התחלה לחופשה", true); return; }
+    if (to < from) { const t = from; from = to; to = t; }        // סדר הפוך — מתקנים
+    state.holidays = normHolidays().concat([{ from, to, note }]);
+    $("holFrom").value = ""; $("holTo").value = ""; $("holNote").value = "";
+    renderAll();
+  });
+  $("btnReset").addEventListener("click", () => {
+    if (confirm("לאפס את הפרויקט ולמחוק את כל המשימות?")) {
+      state = defaults(); seq = 4; syncSettings(); renderAll();
+    }
+  });
+
+  /* ---------- delegated events ---------- */
+  document.getElementById("app").addEventListener("click", e => {
+    const btn = e.target.closest("[data-act]");
+    if (!btn) return;
+    const act = btn.dataset.act;
+
+    if (act === "add") {
+      const prev = state.tasks[state.tasks.length - 1];
+      state.tasks.push({
+        id: "t" + (seq++),
+        name: "",
+        owner: defOwner(),                   // ברירת המחדל שהוגדרה בהגדרות
+        note: "",
+        duration: state.unit === "hours" ? hpd() : 1,
+        dep: prev ? prev.id : null           // ברירת מחדל: תלות במשימה הקודמת
+      });
+      renderAll();
+      const inputs = document.querySelectorAll('[data-f="name"]');
+      if (inputs.length) inputs[inputs.length - 1].focus();
+    }
+
+    if (act === "del") {
+      const id = btn.dataset.id;
+      const removed = state.tasks.find(t => t.id === id);
+      state.tasks = state.tasks.filter(t => t.id !== id);
+      // משימות שהיו תלויות במשימה שנמחקה יורשות את התלות שלה
+      state.tasks.forEach(t => { if (t.dep === id) t.dep = removed && removed.dep ? removed.dep : null; });
+      if (state.tasks.length) state.tasks[0].dep = null;
+      renderAll();
+    }
+
+    if (act === "delowner") {
+      const i = Number(btn.dataset.i);
+      const list = owners().slice();
+      if (list.length <= 1) return;
+      const removed = list.splice(i, 1)[0];
+      state.owners = list;
+      if (state.defaultOwner === removed) state.defaultOwner = list[0];
+      const used = state.tasks.filter(t => t.owner === removed).length;
+      state.tasks.forEach(t => { if (t.owner === removed) t.owner = defOwner(); });
+      renderAll();
+      if (used) toast(`"${removed}" הוסרה — ${used} משימות הועברו ל"${defOwner()}"`);
+    }
+
+    if (act === "delhol") {
+      const i = Number(btn.dataset.i);
+      state.holidays = normHolidays().filter((h, j) => j !== i);
+      renderAll();
+    }
+  });
+
+  document.getElementById("tableBody").addEventListener("input", e => {
+    const el = e.target, id = el.dataset.id;
+    if (el.dataset.f === "name") {
+      const t = state.tasks.find(x => x.id === id);
+      if (t) {
+        t.name = el.value;
+        const idx = state.tasks.indexOf(t) + 1;
+        document.querySelectorAll(`option[value="${id}"]`).forEach(o => { o.textContent = `${idx}. ${t.name || "משימה"}`; });
+        updateBarTitle(t);
+        save();
+      }
+    }
+    if (el.dataset.f === "dur") {
+      const t = state.tasks.find(x => x.id === id);
+      if (t) { t.duration = el.value === "" ? 0 : Number(el.value); refresh(); }
+    }
+    if (el.dataset.f === "note") {
+      const t = state.tasks.find(x => x.id === id);
+      if (t) { t.note = el.value; el.title = el.value; updateBarTitle(t); save(); }
+    }
+  });
+
+  document.getElementById("tableBody").addEventListener("change", e => {
+    const el = e.target, id = el.dataset.id;
+    const t = state.tasks.find(x => x.id === id);
+    if (!t) return;
+    if (el.dataset.f === "dep") { t.dep = el.value || null; refresh(); }
+    if (el.dataset.f === "owner") {
+      t.owner = owners().includes(el.value) ? el.value : defOwner();
+      el.className = "owner-inp " + ownerCls(t.owner);
+      refresh();
+    }
+    if (el.dataset.f === "dur") {
+      const v = Number(el.value);
+      t.duration = isFinite(v) && v > 0 ? v : (state.unit === "hours" ? hpd() : 1);
+      el.value = t.duration;
+      refresh();
+    }
+  });
+
+  /* הדגשת שורה מסונכרנת בין הטבלה לגאנט */
+  document.querySelector(".board").addEventListener("mouseover", e => {
+    const row = e.target.closest("[data-row]");
+    document.querySelectorAll(".row-hl").forEach(x => x.classList.remove("row-hl"));
+    if (row) document.querySelectorAll(`[data-row="${row.dataset.row}"]`).forEach(x => x.classList.add("row-hl"));
+  });
+  document.querySelector(".board").addEventListener("mouseleave", () => {
+    document.querySelectorAll(".row-hl").forEach(x => x.classList.remove("row-hl"));
+  });
+
+  /* ---------- גרירה ימינה/שמאלה על ציר הזמן ---------- */
+  (function enableDragPan() {
+    const board = document.querySelector(".board");
+    let dragging = false, startX = 0, startScroll = 0, pid = null;
+
+    board.addEventListener("pointerdown", e => {
+      if (e.pointerType !== "mouse" || e.button !== 0) return;   // במגע נשארת הגלילה הטבעית
+      if (!e.target.closest("#timelinePane")) return;            // לא גוררים מעל הטבלה
+      dragging = true; pid = e.pointerId;
+      startX = e.clientX; startScroll = board.scrollLeft;
+      board.setPointerCapture(pid);
+      board.classList.add("dragging");
+    });
+
+    board.addEventListener("pointermove", e => {
+      if (!dragging) return;
+      board.scrollLeft = startScroll - (e.clientX - startX);
+      e.preventDefault();
+    });
+
+    const stop = () => {
+      if (!dragging) return;
+      dragging = false;
+      try { board.releasePointerCapture(pid); } catch (err) {}
+      board.classList.remove("dragging");
+    };
+    ["pointerup", "pointercancel", "lostpointercapture"].forEach(ev => board.addEventListener(ev, stop));
+  })();
+
+  /* ---------- ייצוא לאקסל (SpreadsheetML — נפתח ישירות ב-Excel) ---------- */
+  function xe(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+  function exportExcel() {
+    const sch = computeSchedule();
+    const maxLast = state.tasks.length ? Math.max(...state.tasks.map(t => sch[t.id].last)) : -1;
+    const cal = buildCalendar(maxLast + 1);
+    const cols = cal.cols;
+    const FIX = 8;   // מספר עמודות הטבלה שלפני ציר הזמן
+    const total = FIX + cols.length;
+
+    const border = '<Borders>' +
+      ["Top", "Bottom", "Left", "Right"].map(p =>
+        `<Border ss:Position="${p}" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D9E0E8"/>`).join("") +
+      '</Borders>';
+
+    const st = (id, extra) => `<Style ss:ID="${id}">${extra}</Style>`;
+    const fill = c => `<Interior ss:Color="${c}" ss:Pattern="Solid"/>`;
+    const font = (o) => `<Font ss:FontName="Arial" ss:Size="${o.size || 10}"${o.bold ? ' ss:Bold="1"' : ""}${o.color ? ` ss:Color="${o.color}"` : ""}/>`;
+    const alignC = '<Alignment ss:Horizontal="Center" ss:Vertical="Center"/>';
+    const alignR = '<Alignment ss:Horizontal="Right" ss:Vertical="Center"/>';
+    const alignCW = '<Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>';
+
+    const styles = [
+      st("Default", `${font({ size: 10 })}<Alignment ss:Vertical="Center"/>`),
+      st("sTitle", font({ size: 15, bold: true, color: "#1E293B" })),
+      st("sMeta", font({ size: 10, color: "#475569" }) + alignR),
+      st("sMetaB", font({ size: 10, bold: true, color: "#1E293B" }) + alignR),
+      st("sHead", font({ size: 10, bold: true, color: "#FFFFFF" }) + alignCW + fill("#4F46E5") + border),
+      st("sMonth", font({ size: 10, bold: true, color: "#334155" }) + alignC + fill("#EEF2F6") + border),
+      st("sDay", font({ size: 9, color: "#334155" }) + alignCW + fill("#F8FAFC") + border),
+      st("sDayOff", font({ size: 9, color: "#94A3B8" }) + alignCW + fill("#E2E8F0") + border),
+      st("sText", font({}) + alignR + border),
+      st("sCtr", font({}) + alignC + border),
+      st("sEmpty", border),
+      st("sOff", fill("#E2E8F0") + border)
+    ].concat(owners().map((o, i) => {
+      const p = PALETTE[i % PALETTE.length].xls;
+      return st(`sOwn${i}`, font({ size: 10, bold: true, color: p.text }) + alignC + fill(p.tint) + border) +
+             st(`sBar${i}`, fill(p.fill) + border) +
+             st(`sBar${i}H`, fill(p.half) + border);
+    })).join("");
+
+    /* --- רוחבי עמודות --- */
+    const widths = [30, 170, 62, 48, 130, 190, 68, 68].map(w => `<Column ss:Width="${w}"/>`).join("") +
+      cols.map(() => `<Column ss:Width="21"/>`).join("");
+
+    const cell = (v, s, type) =>
+      `<Cell${s ? ` ss:StyleID="${s}"` : ""}${v === "" || v == null ? "/>" : `><Data ss:Type="${type || "String"}">${xe(v)}</Data></Cell>`}`;
+
+    const rows = [];
+    const blanks = (n, s) => Array.from({ length: n }, () => cell("", s)).join("");
+
+    /* --- כותרת ומטא --- */
+    rows.push(`<Row ss:Height="24"><Cell ss:StyleID="sTitle" ss:MergeAcross="5"><Data ss:Type="String">${xe(state.name || "פרויקט")}</Data></Cell></Row>`);
+    const startD = cal.wiToCol[0] != null ? cols[cal.wiToCol[0]].date : parseKey(state.startDate);
+    const meta = [
+      ["התחלה בפועל", `${WD[startD.getDay()]}׳ ${startD.getDate()}/${startD.getMonth() + 1}/${startD.getFullYear()}`],
+      ["יחידת זמן", state.unit === "hours" ? `שעות (${num(hpd())} ש׳ ליום)` : "ימים"],
+      ["ימי חופשה", normHolidays().length ? normHolidays().map(h => {
+        const f = parseKey(h.from), t2 = parseKey(h.to);
+        const range = h.from === h.to
+          ? `${f.getDate()}/${f.getMonth() + 1}/${f.getFullYear()}`
+          : `${f.getDate()}/${f.getMonth() + 1}/${f.getFullYear()}-${t2.getDate()}/${t2.getMonth() + 1}/${t2.getFullYear()}`;
+        return range + (h.note ? ` (${h.note})` : "");
+      }).join(" ; ") : "—"]
+    ];
+    meta.forEach(([k, v]) => {
+      rows.push(`<Row>${cell(k, "sMeta")}${cell(v, "sMetaB")}</Row>`);
+    });
+    rows.push("<Row/>");
+
+    /* --- רצועת חודשים --- */
+    let monthRow = blanks(FIX);
+    let i = 0;
+    while (i < cols.length) {
+      const d = cols[i].date, m = d.getMonth(), y = d.getFullYear();
+      let n = 0;
+      while (i + n < cols.length && cols[i + n].date.getMonth() === m && cols[i + n].date.getFullYear() === y) n++;
+      monthRow += `<Cell ss:StyleID="sMonth"${n > 1 ? ` ss:MergeAcross="${n - 1}"` : ""}><Data ss:Type="String">${xe(MONTHS[m] + " " + y)}</Data></Cell>`;
+      i += n;
+    }
+    rows.push(`<Row ss:Height="18">${monthRow}</Row>`);
+
+    /* --- שורת כותרות --- */
+    const heads = ["#", "משימה", "אחריות", state.unit === "hours" ? "משך (ש׳)" : "משך (ימים)", "תלוי ב־", "הערות", "התחלה", "סיום"];
+    let headRow = heads.map(h => cell(h, "sHead")).join("");
+    cols.forEach(c => {
+      headRow += cell(`${WD[c.date.getDay()]}\n${c.date.getDate()}`, c.work ? "sDay" : "sDayOff");
+    });
+    rows.push(`<Row ss:Height="30">${headRow}</Row>`);
+
+    /* --- שורות משימות --- */
+    state.tasks.forEach((t, idx) => {
+      const s = sch[t.id];
+      const owner = ownerOf(t), oi = ownerIdx(owner);
+      const dep = t.dep ? state.tasks.findIndex(p => p.id === t.dep) : -1;
+      const a = s && s.dd > 0 ? cols[cal.wiToCol[s.first]] : null;
+      const b = s && s.dd > 0 ? cols[cal.wiToCol[s.last]] : null;
+      const fmt = d => d ? `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}` : "—";
+
+      let r = cell(idx + 1, "sCtr", "Number") +
+        cell(t.name || "משימה", "sText") +
+        cell(owner, `sOwn${oi}`) +
+        cell(num(Number(t.duration) || 0), "sCtr", "Number") +
+        cell(dep >= 0 ? `${dep + 1}. ${state.tasks[dep].name || "משימה"}` : "ללא תלות", "sText") +
+        cell(t.note || "", "sText") +
+        cell(a ? fmt(a.date) : "—", "sCtr") +
+        cell(b ? fmt(b.date) : "—", "sCtr");
+
+      // מיפוי ימי העבודה של המשימה לעמודות היומן
+      const fillMap = {};
+      if (s && s.dd > 0) {
+        for (let wi = s.first; wi < Math.ceil(s.end - 1e-9); wi++) {
+          const col = cal.wiToCol[wi];
+          if (col == null) break;
+          const cover = Math.min(s.end, wi + 1) - Math.max(s.s, wi);
+          if (cover > 1e-4) fillMap[col] = cover >= 0.999 ? "full" : "half";
+        }
+      }
+      cols.forEach((c, ci) => {
+        const f = fillMap[ci];
+        let sty = c.work ? "sEmpty" : "sOff";
+        if (f) sty = `sBar${oi}${f === "full" ? "" : "H"}`;
+        r += cell("", sty);
+      });
+      rows.push(`<Row ss:Height="19">${r}</Row>`);
+    });
+
+    const headerRows = 1 + meta.length + 3;   // כותרת + מטא + ריק + רצועת חודשים + שורת כותרות
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+<Styles>${styles}</Styles>
+<Worksheet ss:Name="גאנט">
+<Table ss:ExpandedColumnCount="${total}" ss:ExpandedRowCount="${rows.length + 2}" x:FullColumns="1" x:FullRows="1">${widths}${rows.join("")}</Table>
+<WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
+<DisplayRightToLeft/><PageSetup><Layout x:Orientation="Landscape"/></PageSetup>
+<FreezePanes/><FrozenNoSplit/>
+<SplitHorizontal>${headerRows}</SplitHorizontal><TopRowBottomPane>${headerRows}</TopRowBottomPane>
+<SplitVertical>${FIX}</SplitVertical><LeftColumnRightPane>${FIX}</LeftColumnRightPane>
+<ActivePane>0</ActivePane>
+</WorksheetOptions>
+</Worksheet>
+</Workbook>`;
+
+    const safe = (state.name || "גאנט").replace(/[\\/:*?"<>|]/g, "").trim() || "גאנט";
+    const url = URL.createObjectURL(new Blob(["﻿" + xml], { type: "application/vnd.ms-excel;charset=UTF-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${safe}.xls`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  $("btnExport").addEventListener("click", exportExcel);
+
+  /* ============ ייבוא מאקסל ============ */
+
+  /* --- הודעה קופצת --- */
+  let toastT = null;
+  function toast(msg, bad) {
+    let el = document.getElementById("toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "toast";
+      el.className = "fixed bottom-5 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl text-sm font-medium shadow-lg transition-opacity duration-200";
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.className = el.className.replace(/ (bg|text|border)-\S+/g, "") +
+      (bad ? " bg-rose-600 text-white" : " bg-slate-900 text-white");
+    el.style.opacity = "1";
+    clearTimeout(toastT);
+    toastT = setTimeout(() => { el.style.opacity = "0"; }, 4000);
+  }
+
+  /* --- קריאת xlsx: פריסת ZIP + ניפוח deflate מובנה בדפדפן --- */
+  async function readXlsx(buf) {
+    const u8 = new Uint8Array(buf), dv = new DataView(buf);
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= 0 && i > u8.length - 22 - 65536; i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error("הקובץ אינו xlsx תקין");
+
+    const count = dv.getUint16(eocd + 10, true);
+    let off = dv.getUint32(eocd + 16, true);
+    const entries = {};
+    const dec = new TextDecoder("utf-8");
+    for (let n = 0; n < count && dv.getUint32(off, true) === 0x02014b50; n++) {
+      const method = dv.getUint16(off + 10, true);
+      const compSize = dv.getUint32(off + 20, true);
+      const nameLen = dv.getUint16(off + 28, true);
+      const extraLen = dv.getUint16(off + 30, true);
+      const cmtLen = dv.getUint16(off + 32, true);
+      const lho = dv.getUint32(off + 42, true);
+      entries[dec.decode(u8.subarray(off + 46, off + 46 + nameLen))] = { method, compSize, lho };
+      off += 46 + nameLen + extraLen + cmtLen;
+    }
+
+    async function read(name) {
+      const f = entries[name];
+      if (!f) return null;
+      const nl = dv.getUint16(f.lho + 26, true), el = dv.getUint16(f.lho + 28, true);
+      const start = f.lho + 30 + nl + el;
+      const data = u8.subarray(start, start + f.compSize);
+      if (f.method === 0) return dec.decode(data);
+      if (typeof DecompressionStream === "undefined") throw new Error("הדפדפן לא תומך בפתיחת xlsx — שמרו כ-CSV");
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      return await new Response(stream).text();
+    }
+
+    /* מחרוזות משותפות */
+    const shared = [];
+    const ssXml = await read("xl/sharedStrings.xml");
+    if (ssXml) {
+      const doc = new DOMParser().parseFromString(ssXml, "application/xml");
+      [...doc.getElementsByTagName("si")].forEach(si => {
+        shared.push([...si.getElementsByTagName("t")].map(t => t.textContent).join(""));
+      });
+    }
+
+    /* גיליון ראשון */
+    const sheetName = Object.keys(entries).find(k => /^xl\/worksheets\/sheet1\.xml$/.test(k)) ||
+                      Object.keys(entries).find(k => /^xl\/worksheets\/.+\.xml$/.test(k));
+    if (!sheetName) throw new Error("לא נמצא גיליון בקובץ");
+    const doc = new DOMParser().parseFromString(await read(sheetName), "application/xml");
+
+    const colIdx = ref => {
+      let n = 0;
+      for (const ch of ref.replace(/[^A-Z]/gi, "").toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+      return n - 1;
+    };
+
+    return [...doc.getElementsByTagName("row")].map(row => {
+      const out = [];
+      [...row.getElementsByTagName("c")].forEach(c => {
+        const ci = c.getAttribute("r") ? colIdx(c.getAttribute("r")) : out.length;
+        const t = c.getAttribute("t");
+        let v = "";
+        if (t === "s") {
+          const iv = c.getElementsByTagName("v")[0];
+          v = iv ? (shared[Number(iv.textContent)] || "") : "";
+        } else if (t === "inlineStr") {
+          v = [...c.getElementsByTagName("t")].map(x => x.textContent).join("");
+        } else {
+          const iv = c.getElementsByTagName("v")[0];
+          v = iv ? iv.textContent : "";
+        }
+        out[ci] = String(v).trim();
+      });
+      for (let i = 0; i < out.length; i++) if (out[i] == null) out[i] = "";
+      return out;
+    });
+  }
+
+  /* --- קריאת SpreadsheetML (ה-xls שהמערכת מייצאת) --- */
+  function readSpreadsheetML(text) {
+    const doc = new DOMParser().parseFromString(text, "application/xml");
+    if (doc.querySelector("parsererror")) throw new Error("קובץ ה-XML פגום");
+    return [...doc.getElementsByTagName("Row")].map(row => {
+      const out = [];
+      let i = 0;
+      [...row.getElementsByTagName("Cell")].forEach(c => {
+        const idx = c.getAttribute("ss:Index");
+        if (idx) i = Number(idx) - 1;
+        const d = c.getElementsByTagName("Data")[0];
+        out[i] = d ? d.textContent.trim() : "";
+        i += 1 + Number(c.getAttribute("ss:MergeAcross") || 0);
+      });
+      for (let k = 0; k < out.length; k++) if (out[k] == null) out[k] = "";
+      return out;
+    });
+  }
+
+  /* --- קריאת HTML table (חלק מהייצואים של Excel) --- */
+  function readHtmlTable(text) {
+    const doc = new DOMParser().parseFromString(text, "text/html");
+    const tbl = doc.querySelector("table");
+    if (!tbl) throw new Error("לא נמצאה טבלה בקובץ");
+    return [...tbl.rows].map(r => [...r.cells].map(c => c.textContent.trim()));
+  }
+
+  /* --- קריאת CSV --- */
+  function readCsv(text) {
+    text = text.replace(/^﻿/, "");
+    const first = text.split(/\r?\n/)[0] || "";
+    const d = (first.match(/\t/g) || []).length > (first.match(/,/g) || []).length ? "\t"
+            : (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ";" : ",";
+    const rows = [];
+    let row = [], cur = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) {
+        if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+        else cur += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === d) { row.push(cur.trim()); cur = ""; }
+      else if (ch === "\n") { row.push(cur.trim()); rows.push(row); row = []; cur = ""; }
+      else if (ch !== "\r") cur += ch;
+    }
+    row.push(cur.trim());
+    if (row.some(x => x !== "")) rows.push(row);
+    return rows;
+  }
+
+  /* --- המרת שורות גולמיות למצב המערכת --- */
+  function rowsToState(rows) {
+    rows = rows.filter(r => Array.isArray(r));
+    const cellAt = (r, i) => (i >= 0 && r[i] != null ? String(r[i]).trim() : "");
+
+    /* איתור שורת הכותרות */
+    const hi = rows.findIndex(r => r.some(c => /^\s*(משימה|שם המשימה|תיאור|task)/i.test(String(c || ""))));
+    if (hi < 0) throw new Error('לא נמצאה עמודת "משימה" בקובץ');
+
+    const head = rows[hi].map(c => String(c || "").trim());
+    const map = { name: -1, owner: -1, dur: -1, dep: -1, note: -1 };
+    head.forEach((h, i) => {
+      if (map.note < 0 && /הער|note|comment|remark/i.test(h)) map.note = i;
+      else if (map.name < 0 && /משימה|תיאור|task|name/i.test(h)) map.name = i;
+      else if (map.owner < 0 && /אחריות|אחראי|owner|responsib/i.test(h)) map.owner = i;
+      else if (map.dur < 0 && /משך|duration|ימים|שעות/i.test(h)) map.dur = i;
+      else if (map.dep < 0 && /תלוי|תלות|depend|predecess/i.test(h)) map.dep = i;
+    });
+
+    /* יחידת זמן — מתוך כותרת עמודת המשך או משורות המטא */
+    const next = Object.assign({}, state, { holidays: normHolidays() });
+    const durHead = cellAt(head, map.dur);
+    if (/שע/.test(durHead)) next.unit = "hours";
+    else if (/ימ|day/i.test(durHead)) next.unit = "days";
+
+    const grabDate = s => {
+      const m = String(s).match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);
+      if (!m) return null;
+      let y = Number(m[3]); if (y < 100) y += 2000;
+      return key(new Date(y, Number(m[2]) - 1, Number(m[1])));
+    };
+
+    /* שורות מטא שמעל הכותרת (ייצוא של המערכת) */
+    rows.slice(0, hi).forEach(r => {
+      const a = cellAt(r, 0), b = r.slice(1).map(x => String(x || "").trim()).find(x => x !== "") || "";
+      if (!a || !b) return;
+      if (/התחלה/.test(a)) { const k = grabDate(b); if (k) next.startDate = k; }
+      else if (/יחידת זמן/.test(a)) {
+        next.unit = /שע/.test(b) ? "hours" : "days";
+        const h = b.match(/([\d.]+)/);
+        if (h && next.unit === "hours") next.hoursPerDay = Number(h[1]) || next.hoursPerDay;
+      } else if (/חופש/.test(a)) {
+        const parts = (b.indexOf(";") >= 0 ? b.split(";") : b.split(",")).map(x => x.trim()).filter(Boolean);
+        const hs = [];
+        parts.forEach(p => {
+          const noteM = p.match(/\(([^)]*)\)\s*$/);
+          const note = noteM ? noteM[1].trim() : "";
+          const body = noteM ? p.slice(0, noteM.index) : p;
+          const dates = (body.match(/\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}/g) || []).map(grabDate).filter(Boolean);
+          if (dates.length) hs.push({ from: dates[0], to: dates[1] || dates[0], note });
+        });
+        if (hs.length) next.holidays = hs;
+        else if (/^—?$/.test(b.trim())) next.holidays = [];
+      }
+    });
+
+    /* שורות המשימות */
+    const raw = [];
+    for (let i = hi + 1; i < rows.length && raw.length < 500; i++) {
+      const r = rows[i];
+      const nm = cellAt(r, map.name);
+      const dr = cellAt(r, map.dur);
+      if (!nm && !dr) continue;                                  // שורה ריקה
+      if (/^(סה"?כ|total)/i.test(nm)) continue;                  // שורת סיכום
+      raw.push({
+        name: nm || "משימה",
+        ownerRaw: cellAt(r, map.owner),
+        durRaw: dr,
+        note: map.note >= 0 ? cellAt(r, map.note) : "",
+        depRaw: map.dep >= 0 ? cellAt(r, map.dep) : null
+      });
+    }
+    if (!raw.length) throw new Error("לא נמצאו משימות בקובץ");
+
+    /* אחריות: התאמה לאפשרויות הקיימות, וערך חדש מהקובץ נוסף כאפשרות */
+    const ownerList = owners().slice();
+    const resolveOwner = txt => {
+      const v = String(txt || "").trim();
+      if (!v) return null;
+      const hit = ownerList.find(o => o.toLowerCase() === v.toLowerCase());
+      if (hit) return hit;
+      if (ownerList.length < PALETTE.length) { ownerList.push(v); return v; }
+      return null;
+    };
+
+    const fallbackDur = next.unit === "hours" ? (Number(next.hoursPerDay) || 8.5) : 1;
+    const tasks = raw.map((x, i) => {
+      const v = parseFloat(String(x.durRaw).replace(/[^\d.\-]/g, ""));
+      return {
+        id: "i" + (i + 1), name: x.name, owner: resolveOwner(x.ownerRaw) || defOwner(), note: x.note || "",
+        duration: isFinite(v) && v > 0 ? v : fallbackDur, dep: null
+      };
+    });
+    next.owners = ownerList;
+    if (!ownerList.includes(next.defaultOwner)) next.defaultOwner = ownerList[0];
+
+    /* פענוח תלויות: "2. פיתוח" / מספר / שם משימה / "ללא תלות" */
+    tasks.forEach((t, i) => {
+      if (i === 0) return;
+      const s = raw[i].depRaw;
+      if (s === null) { t.dep = tasks[i - 1].id; return; }        // אין עמודת תלות → ברירת מחדל
+      const txt = String(s).trim();
+      if (!txt || /ללא|none|—|^-$/i.test(txt)) return;            // ללא תלות
+      let target = -1;
+      const numMatch = txt.match(/^\s*(\d+)/);
+      if (numMatch) target = Number(numMatch[1]) - 1;
+      if (target < 0 || target >= i) {
+        const clean = txt.replace(/^\s*\d+\s*[.)\-]\s*/, "").trim();
+        target = tasks.findIndex((p, j) => j < i && p.name.trim() === clean);
+      }
+      t.dep = target >= 0 && target < i ? tasks[target].id : tasks[i - 1].id;
+    });
+
+    next.tasks = tasks;
+    return next;
+  }
+
+  async function importFile(file) {
+    const buf = await file.arrayBuffer();
+    const sig = new Uint8Array(buf.slice(0, 8));
+    let rows;
+
+    if (sig[0] === 0x50 && sig[1] === 0x4b) {
+      rows = await readXlsx(buf);
+    } else if (sig[0] === 0xd0 && sig[1] === 0xcf) {
+      throw new Error("קובץ xls ישן אינו נתמך — שמרו אותו כ-xlsx או CSV");
+    } else {
+      const text = new TextDecoder("utf-8").decode(buf).replace(/^﻿/, "");
+      if (/^\s*<\?xml|<Workbook/i.test(text)) rows = readSpreadsheetML(text);
+      else if (/<table[\s>]/i.test(text)) rows = readHtmlTable(text);
+      else rows = readCsv(text);
+    }
+
+    const next = rowsToState(rows);
+    if (state.tasks.length && !confirm(`נמצאו ${next.tasks.length} משימות. הייבוא יחליף את ${state.tasks.length} המשימות הקיימות. להמשיך?`)) return null;
+
+    state = next;
+    const idMap = {};
+    seq = 1;
+    state.tasks.forEach(t => { const nid = "t" + (seq++); idMap[t.id] = nid; t.id = nid; });
+    state.tasks.forEach(t => { t.dep = t.dep ? (idMap[t.dep] || null) : null; });
+    return state.tasks.length;
+  }
+
+  $("btnImport").addEventListener("click", () => $("fileImport").click());
+  $("fileImport").addEventListener("change", async e => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const n = await importFile(file);
+      if (n === null) return;
+      syncSettings();
+      renderAll();
+      toast(`יובאו ${n} משימות מתוך "${file.name}"`);
+    } catch (err) {
+      toast(err && err.message ? err.message : "שגיאה בקריאת הקובץ", true);
+    }
+  });
+
+  /* ============ שמירה קבועה לקובץ ============ */
+
+  const hasFSA = typeof window.showSaveFilePicker === "function";
+  let fileHandle = null, fileName = "", lastSaved = null, saveTimer = null, loading = false, fsaBroken = false;
+
+  function stateJson() { return JSON.stringify({ v: 1, app: "mini-gantt", data: state }, null, 2); }
+
+  function applyJson(text) {
+    let obj;
+    try { obj = JSON.parse(text); } catch (e) { throw new Error("הקובץ אינו קובץ פרויקט תקין"); }
+    const d = obj && obj.data ? obj.data : obj;
+    if (!d || !Array.isArray(d.tasks)) throw new Error("הקובץ אינו קובץ פרויקט תקין");
+    loading = true;
+    state = Object.assign(defaults(), d);
+    seq = 1;
+    state.tasks.forEach(t => {
+      if (!OWNERS.includes(t.owner)) t.owner = OWNERS[0];
+      if (typeof t.note !== "string") t.note = "";
+      const n = parseInt(String(t.id).replace(/\D/g, ""), 10);
+      if (n >= seq) seq = n + 1;
+    });
+    syncSettings();
+    renderAll();
+    loading = false;
+  }
+
+  async function writeToFile() {
+    if (!fileHandle) return;
+    const w = await fileHandle.createWritable();
+    await w.write(new Blob([stateJson()], { type: "application/json" }));
+    await w.close();
+    lastSaved = new Date();
+    updateSaveBar();
+  }
+
+  function queueFileSave() {
+    if (!fileHandle || loading) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      writeToFile().catch(() => { toast("השמירה לקובץ נכשלה — נסו 'שמירה לקובץ' שוב", true); fileHandle = null; updateSaveBar(); });
+    }, 400);
+  }
+
+  function downloadJson() {
+    const safe = (state.name || "גאנט").replace(/[\\/:*?"<>|]/g, "").trim() || "גאנט";
+    const url = URL.createObjectURL(new Blob([stateJson()], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = `${safe}.gantt.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast("הקובץ הורד — כדי להמשיך לעבוד עליו פתחו אותו דרך \"פתיחה מקובץ\"");
+  }
+
+  function updateSaveBar() {
+    const bar = $("saveBar"), dot = $("saveDot"), txt = $("saveTxt");
+    const time = lastSaved ? ` · נשמר ב-${pad(lastSaved.getHours())}:${pad(lastSaved.getMinutes())}` : "";
+    let tone, dotC, msg;
+
+    if (fileHandle) {
+      tone = "bg-emerald-50 border-emerald-200"; dotC = "bg-emerald-500";
+      msg = `שמירה אוטומטית לקובץ "${fileName}"${time}`;
+    } else if (storageOK) {
+      tone = "bg-slate-50 border-slate-200"; dotC = "bg-slate-400";
+      msg = "נשמר אוטומטית בדפדפן הזה בלבד — לשמירה קבועה בחרו \"שמירה לקובץ\"";
+    } else {
+      tone = "bg-rose-50 border-rose-200"; dotC = "bg-rose-500";
+      msg = "הדפדפן חוסם שמירה מקומית בקובץ מקומי — חובה לשמור לקובץ כדי לא לאבד נתונים";
+    }
+    bar.className = "flex flex-wrap items-center gap-2 mb-4 rounded-xl border px-3 py-2 " + tone;
+    dot.className = "w-2 h-2 rounded-full shrink-0 " + dotC;
+    txt.textContent = msg;
+  }
+
+  $("btnSaveFile").addEventListener("click", async () => {
+    if (fileHandle) { try { await writeToFile(); toast("נשמר"); } catch (e) { toast("השמירה נכשלה", true); } return; }
+    if (!hasFSA || fsaBroken) { downloadJson(); return; }
+    try {
+      const safe = (state.name || "גאנט").replace(/[\\/:*?"<>|]/g, "").trim() || "גאנט";
+      fileHandle = await window.showSaveFilePicker({
+        suggestedName: `${safe}.gantt.json`,
+        types: [{ description: "פרויקט מיני גאנט", accept: { "application/json": [".json"] } }]
+      });
+      fileName = fileHandle.name;
+      await writeToFile();
+      toast("מעכשיו כל שינוי נשמר אוטומטית לקובץ");
+    } catch (err) {
+      fileHandle = null;
+      if (err && err.name === "AbortError") return;      // המשתמש ביטל
+      fsaBroken = true;
+      downloadJson();
+    }
+    updateSaveBar();
+  });
+
+  $("btnOpenFile").addEventListener("click", async () => {
+    if (!hasFSA || fsaBroken) { $("fileJson").click(); return; }
+    try {
+      const [h] = await window.showOpenFilePicker({
+        types: [{ description: "פרויקט מיני גאנט", accept: { "application/json": [".json", ".gantt"] } }]
+      });
+      const f = await h.getFile();
+      applyJson(await f.text());
+      fileHandle = h; fileName = h.name; lastSaved = new Date();
+      updateSaveBar();
+      toast(`הפרויקט נטען מ-"${h.name}" — כל שינוי יישמר אליו אוטומטית`);
+    } catch (err) {
+      if (err && err.name === "AbortError") return;
+      if (err && err.message && !/picker/i.test(err.message)) { toast(err.message, true); return; }
+      fsaBroken = true;
+      $("fileJson").click();
+    }
+  });
+
+  $("fileJson").addEventListener("change", async e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    try {
+      applyJson(await f.text());
+      toast(`הפרויקט נטען מ-"${f.name}" — לשמירה לחצו "שמירה לקובץ"`);
+    } catch (err) { toast(err.message || "שגיאה בקריאת הקובץ", true); }
+  });
+
+  window.addEventListener("beforeunload", e => {
+    if (!fileHandle && !storageOK && state.tasks.length) { e.preventDefault(); e.returnValue = ""; }
+  });
+
+  /* ---------- init ---------- */
+  load();
+  syncSettings();
+  renderAll();
+  updateSaveBar();
+})();
+</script>
+</body>
+</html>
