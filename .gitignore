@@ -6,3 +6,5 @@ desktop.ini
 
 # project data files
 *.gantt.json
+
+.vercel
