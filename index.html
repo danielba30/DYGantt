@@ -39,7 +39,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
   @media (max-width: 767px) {
     .trow { grid-template-columns: var(--tcols-sm); }
     .tbl-pane { width: 366px; }
-    .col-note, .col-dates { display:none !important; }
+    .col-note, .col-dates, .col-status { display:none !important; }
   }
   /* ידיות לגרירת רוחב וסידור עמודות */
   .thead-cell { position:relative; }
@@ -343,6 +343,18 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     { sel: "bg-teal-50 border-teal-200 text-teal-700",         bar: "bg-teal-500 shadow-teal-200/70",       xls: { fill: "#14B8A6", half: "#5EEAD4", tint: "#F0FDFA", text: "#0F766E" } },
     { sel: "bg-orange-50 border-orange-200 text-orange-700",   bar: "bg-orange-500 shadow-orange-200/70",   xls: { fill: "#F97316", half: "#FDBA74", tint: "#FFF7ED", text: "#C2410C" } }
   ];
+  /* ---------- סטטוס ---------- */
+  const STATUSES = ["ממתין", "בתהליך", "בבדיקה", "חסום", "הסתיים"];
+  const STATUS_STYLE = {
+    "ממתין":  { sel: "bg-slate-100 border-slate-200 text-slate-600",       xls: { tint: "#F1F5F9", text: "#475569" } },
+    "בתהליך": { sel: "bg-sky-50 border-sky-200 text-sky-700",              xls: { tint: "#E0F2FE", text: "#0369A1" } },
+    "בבדיקה": { sel: "bg-violet-50 border-violet-200 text-violet-700",     xls: { tint: "#EDE9FE", text: "#6D28D9" } },
+    "חסום":   { sel: "bg-rose-50 border-rose-200 text-rose-700",           xls: { tint: "#FFE4E6", text: "#BE123C" } },
+    "הסתיים": { sel: "bg-emerald-50 border-emerald-200 text-emerald-700",  xls: { tint: "#D1FAE5", text: "#047857" } }
+  };
+  const statusOf = t => (STATUSES.includes(t.status) ? t.status : STATUSES[0]);
+  const statusCls = s => STATUS_STYLE[s].sel;
+
   const owners = () => (Array.isArray(state.owners) && state.owners.length ? state.owners : ["אלעד"]);
   const defOwner = () => (owners().includes(state.defaultOwner) ? state.defaultOwner : owners()[0]);
   const ownerOf = t => (owners().includes(t.owner) ? t.owner : defOwner());
@@ -365,9 +377,9 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
       colOrder: null,
       colWidths: {},
       tasks: [
-        { id: "t1", name: "אפיון ותכנון", owner: "אלעד", duration: 2, dep: null, note: "" },
-        { id: "t2", name: "פיתוח", owner: "אלעד", duration: 5, dep: "t1", note: "" },
-        { id: "t3", name: "בדיקות ומסירה", owner: "לקוח", duration: 1.5, dep: "t2", note: "" }
+        { id: "t1", name: "אפיון ותכנון", owner: "אלעד", status: "הסתיים", duration: 2, dep: null, note: "" },
+        { id: "t2", name: "פיתוח", owner: "אלעד", status: "בתהליך", duration: 5, dep: "t1", note: "" },
+        { id: "t3", name: "בדיקות ומסירה", owner: "לקוח", status: "ממתין", duration: 1.5, dep: "t2", note: "" }
       ]
     };
   }
@@ -399,6 +411,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     out.tasks.forEach(t => {
       if (!owners().includes(t.owner)) t.owner = defOwner();
       if (typeof t.note !== "string") t.note = "";
+      if (!STATUSES.includes(t.status)) t.status = STATUSES[0];
       const n = parseInt(String(t.id).replace(/\D/g, ""), 10);
       if (n >= s) s = n + 1;
     });
@@ -546,18 +559,39 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
       item("סיום מתוכנן", endD ? `${WD[endD.getDay()]}׳ ${shortDate(endD)}` : "—", "text-indigo-600") +
       item("משך כולל", totalTxt) +
       item("ימים קלנדריים", span ? `${span} ימים` : "—") +
-      item("משימות", `${state.tasks.length}`);
+      progressItem();
+  }
+
+  /* התקדמות לפי סטטוס: כמה משימות הסתיימו, וכמה חסומות */
+  function progressItem() {
+    const n = state.tasks.length;
+    const done = state.tasks.filter(t => statusOf(t) === "הסתיים").length;
+    const blocked = state.tasks.filter(t => statusOf(t) === "חסום").length;
+    const pct = n ? Math.round(done / n * 100) : 0;
+    return `<div class="stat">
+      <div class="text-[11px] text-slate-500 flex items-center gap-1.5">
+        <span>הושלמו</span>
+        ${blocked ? `<span class="text-rose-600 font-medium">${blocked} חסומות</span>` : ""}
+      </div>
+      <div class="flex items-center gap-2 mt-1">
+        <div class="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+          <div class="h-full rounded-full bg-emerald-500 transition-all" style="width:${pct}%"></div>
+        </div>
+        <span class="text-sm font-semibold text-slate-800 tabular-nums shrink-0">${done}/${n}</span>
+      </div>
+    </div>`;
   }
 
   /* ---------- עמודות הטבלה: סדר ורוחב ניתנים לגרירה ---------- */
   const COLDEFS = [
-    { key: "idx",   label: "#",       w: 40,  min: 30,  sm: "28px",                fixed: true, resize: false },
-    { key: "name",  label: "משימה",   w: 160, min: 90,  sm: "minmax(88px,1fr)" },
-    { key: "owner", label: "אחריות",  w: 96,  min: 70,  sm: "74px" },
-    { key: "dur",   label: "משך",     w: 84,  min: 58,  sm: "58px" },
-    { key: "dep",   label: "תלוי ב־", w: 122, min: 80,  sm: "88px" },
-    { key: "note",  label: "הערות",   w: 150, min: 80,  sm: null },
-    { key: "dates", label: "תאריכים", w: 112, min: 84,  sm: null },
+    { key: "idx",    label: "#",       w: 40,  min: 30,  sm: "28px",                fixed: true, resize: false },
+    { key: "name",   label: "משימה",   w: 152, min: 90,  sm: "minmax(88px,1fr)" },
+    { key: "owner",  label: "אחריות",  w: 94,  min: 70,  sm: "74px" },
+    { key: "status", label: "סטטוס",   w: 98,  min: 74,  sm: null },
+    { key: "dur",    label: "משך",     w: 82,  min: 58,  sm: "58px" },
+    { key: "dep",    label: "תלוי ב־", w: 114, min: 80,  sm: "88px" },
+    { key: "note",   label: "הערות",   w: 130, min: 80,  sm: null },
+    { key: "dates",  label: "תאריכים", w: 104, min: 84,  sm: null },
     { key: "act",   label: "",        w: 36,  min: 36,  sm: "30px",                fixed: true, resize: false }
   ];
   const DEF_ORDER = COLDEFS.filter(c => !c.fixed).map(c => c.key);
@@ -703,6 +737,11 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
               ${owners().map(o => `<option value="${esc(o)}" ${ownerOf(t) === o ? "selected" : ""}>${esc(o)}</option>`).join("")}
             </select>
           </div>`,
+        status: `<div class="col-status px-1">
+            <select class="owner-inp ${statusCls(statusOf(t))}" data-f="status" data-id="${t.id}">
+              ${STATUSES.map(s => `<option value="${esc(s)}" ${statusOf(t) === s ? "selected" : ""}>${esc(s)}</option>`).join("")}
+            </select>
+          </div>`,
         dur: `<div class="col-dur px-1"><input type="number" class="cell-inp text-center tabular-nums" data-f="dur" data-id="${t.id}" value="${esc(t.duration)}" step="0.5" min="0.5"></div>`,
         dep: `<div class="col-dep px-1">
             <select class="cell-inp text-xs ${i === 0 ? "text-slate-400" : ""}" data-f="dep" data-id="${t.id}" ${i === 0 ? "disabled" : ""}>${opts}</select>
@@ -748,7 +787,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
   }
 
   /* טולטיפ לפס בגאנט: שם המשימה + ההערה */
-  const barTip = t => [t.name || "משימה", t.note].filter(x => x && String(x).trim()).join(" — ");
+  const barTip = t => [t.name || "משימה", statusOf(t), t.note].filter(x => x && String(x).trim()).join(" — ");
   function updateBarTitle(t) {
     const tip = barTip(t);
     document.querySelectorAll(`[data-bar="${t.id}"]`).forEach(b => { b.title = tip; });
@@ -824,6 +863,9 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
 
         const label = state.unit === "hours" ? `${num(Number(t.duration) || 0)} ש׳` : `${num(Number(t.duration) || 0)} י׳`;
         const tip = barTip(t);
+        /* רמז סטטוס עדין על הפס — הצבע עצמו נשאר של האחריות */
+        const st = statusOf(t);
+        const stateCls = st === "הסתיים" ? " opacity-50" : st === "חסום" ? " ring-2 ring-rose-500" : "";
         const spanOf = r => (r.c1 + r.b1) - (r.c0 + r.a0);
         let widest = 0;
         runs.forEach((r, k) => { if (spanOf(r) > spanOf(runs[widest])) widest = k; });
@@ -834,9 +876,9 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
           const round = (k === 0 ? "rounded-s-md " : "") + (k === runs.length - 1 ? "rounded-e-md" : "");
           const show = k === widest && w >= 42;
           bars += `<div data-bar="${t.id}" title="${esc(tip)}"
-                     class="absolute top-1/2 -translate-y-1/2 h-[22px] ${ownerBar(ownerOf(t))} ${round} shadow-sm flex items-center justify-center overflow-hidden"
+                     class="absolute top-1/2 -translate-y-1/2 h-[22px] ${ownerBar(ownerOf(t))} ${round} shadow-sm flex items-center justify-center overflow-hidden${stateCls}"
                      style="inset-inline-start:${left}px;width:${Math.max(4, w - 2)}px">
-                     ${show ? `<span class="text-[10px] font-medium text-white/95 whitespace-nowrap px-1">${label}</span>` : ""}
+                     ${show ? `<span class="text-[10px] font-medium text-white/95 whitespace-nowrap px-1">${st === "הסתיים" ? "✓ " : ""}${label}</span>` : ""}
                    </div>`;
         });
       }
@@ -1109,6 +1151,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
         id: "t" + (seq++),
         name: "",
         owner: defOwner(),                   // ברירת המחדל שהוגדרה בהגדרות
+        status: STATUSES[0],
         note: "",
         duration: state.unit === "hours" ? hpd() : 1,
         dep: prev ? prev.id : null           // ברירת מחדל: תלות במשימה הקודמת
@@ -1182,6 +1225,11 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
       el.className = "owner-inp " + ownerCls(t.owner);
       refresh();
     }
+    if (el.dataset.f === "status") {
+      t.status = STATUSES.includes(el.value) ? el.value : STATUSES[0];
+      el.className = "owner-inp " + statusCls(t.status);
+      refresh();
+    }
     if (el.dataset.f === "dur") {
       const v = Number(el.value);
       t.duration = isFinite(v) && v > 0 ? v : (state.unit === "hours" ? hpd() : 1);
@@ -1237,7 +1285,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     const maxLast = state.tasks.length ? Math.max(...state.tasks.map(t => sch[t.id].last)) : -1;
     const cal = buildCalendar(maxLast + 1);
     const cols = cal.cols;
-    const FIX = 8;   // מספר עמודות הטבלה שלפני ציר הזמן
+    const FIX = 9;   // מספר עמודות הטבלה שלפני ציר הזמן
     const total = FIX + cols.length;
 
     const border = '<Borders>' +
@@ -1265,7 +1313,10 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
       st("sCtr", font({}) + alignC + border),
       st("sEmpty", border),
       st("sOff", fill("#E2E8F0") + border)
-    ].concat(owners().map((o, i) => {
+    ].concat(STATUSES.map((s, i) => {
+      const p = STATUS_STYLE[s].xls;
+      return st("sSt" + i, font({ size: 10, bold: true, color: p.text }) + alignC + fill(p.tint) + border);
+    })).concat(owners().map((o, i) => {
       const p = PALETTE[i % PALETTE.length].xls;
       return st(`sOwn${i}`, font({ size: 10, bold: true, color: p.text }) + alignC + fill(p.tint) + border) +
              st(`sBar${i}`, fill(p.fill) + border) +
@@ -1273,7 +1324,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     })).join("");
 
     /* --- רוחבי עמודות --- */
-    const widths = [30, 170, 62, 48, 130, 190, 68, 68].map(w => `<Column ss:Width="${w}"/>`).join("") +
+    const widths = [30, 170, 62, 62, 48, 130, 190, 68, 68].map(w => `<Column ss:Width="${w}"/>`).join("") +
       cols.map(() => `<Column ss:Width="21"/>`).join("");
 
     const cell = (v, s, type) =>
@@ -1314,7 +1365,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     rows.push(`<Row ss:Height="18">${monthRow}</Row>`);
 
     /* --- שורת כותרות --- */
-    const heads = ["#", "משימה", "אחריות", state.unit === "hours" ? "משך (ש׳)" : "משך (ימים)", "תלוי ב־", "הערות", "התחלה", "סיום"];
+    const heads = ["#", "משימה", "אחריות", "סטטוס", state.unit === "hours" ? "משך (ש׳)" : "משך (ימים)", "תלוי ב־", "הערות", "התחלה", "סיום"];
     let headRow = heads.map(h => cell(h, "sHead")).join("");
     cols.forEach(c => {
       headRow += cell(`${WD[c.date.getDay()]}\n${c.date.getDate()}`, c.work ? "sDay" : "sDayOff");
@@ -1333,6 +1384,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
       let r = cell(idx + 1, "sCtr", "Number") +
         cell(t.name || "משימה", "sText") +
         cell(owner, `sOwn${oi}`) +
+        cell(statusOf(t), "sSt" + STATUSES.indexOf(statusOf(t))) +
         cell(num(Number(t.duration) || 0), "sCtr", "Number") +
         cell(dep >= 0 ? `${dep + 1}. ${state.tasks[dep].name || "משימה"}` : "ללא תלות", "sText") +
         cell(t.note || "", "sText") +
@@ -1551,9 +1603,10 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     if (hi < 0) throw new Error('לא נמצאה עמודת "משימה" בקובץ');
 
     const head = rows[hi].map(c => String(c || "").trim());
-    const map = { name: -1, owner: -1, dur: -1, dep: -1, note: -1 };
+    const map = { name: -1, owner: -1, dur: -1, dep: -1, note: -1, status: -1 };
     head.forEach((h, i) => {
-      if (map.note < 0 && /הער|note|comment|remark/i.test(h)) map.note = i;
+      if (map.status < 0 && /סטטוס|מצב|status/i.test(h)) map.status = i;
+      else if (map.note < 0 && /הער|note|comment|remark/i.test(h)) map.note = i;
       else if (map.name < 0 && /משימה|תיאור|task|name/i.test(h)) map.name = i;
       else if (map.owner < 0 && /אחריות|אחראי|owner|responsib/i.test(h)) map.owner = i;
       else if (map.dur < 0 && /משך|duration|ימים|שעות/i.test(h)) map.dur = i;
@@ -1610,6 +1663,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
         ownerRaw: cellAt(r, map.owner),
         durRaw: dr,
         note: map.note >= 0 ? cellAt(r, map.note) : "",
+        statusRaw: map.status >= 0 ? cellAt(r, map.status) : "",
         depRaw: map.dep >= 0 ? cellAt(r, map.dep) : null
       });
     }
@@ -1631,6 +1685,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
       const v = parseFloat(String(x.durRaw).replace(/[^\d.\-]/g, ""));
       return {
         id: "i" + (i + 1), name: x.name, owner: resolveOwner(x.ownerRaw) || defOwner(), note: x.note || "",
+        status: STATUSES.find(s => s === String(x.statusRaw || "").trim()) || STATUSES[0],
         duration: isFinite(v) && v > 0 ? v : fallbackDur, dep: null
       };
     });
