@@ -350,7 +350,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
       </div>
       <div>
         <h3 class="text-base font-bold text-slate-900 leading-tight">שיתוף ללקוח — תצוגה בלבד</h3>
-        <p class="text-xs text-slate-500 mt-0.5">הקישור מכיל את הפרויקט כולו בתוכו. מי שפותח אותו רואה את הגאנט ואינו יכול לערוך.</p>
+        <p class="text-xs text-slate-500 mt-0.5">קישור קצר וקבוע לגאנט הזה. מי שפותח אותו רואה את הגאנט ואינו יכול לערוך.</p>
       </div>
     </div>
 
@@ -363,12 +363,14 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
 
     <div class="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 mb-4">
       <p class="text-[11px] text-amber-800 leading-relaxed">
-        הקישור הוא <b>תמונת מצב</b> — אחרי שתעדכנו את הגאנט צריך לשלוח קישור חדש.
-        מצב הצפייה מסתיר את כלי העריכה אך אינו אבטחה: כל מי שיש לו את הקישור רואה את התוכן.
+        הקישור <b>מתעדכן אוטומטית</b> — כל שינוי שתעשו בגאנט נשמר גם בו, ואין צורך לשלוח קישור חדש.
+        כל מי שיש לו את הקישור רואה את התוכן, אבל רק מי שיודע את הסיסמה יכול לשנות אותו.
       </p>
     </div>
 
     <div class="flex justify-end gap-2">
+      <button id="btnStopShare" class="btn-ghost text-rose-600">הפסקת שיתוף</button>
+      <span class="flex-1"></span>
       <button id="btnPreviewShare" class="btn-ghost">פתיחה בתצוגה מקדימה</button>
       <button id="btnCloseShare" class="btn-ghost">סגירה</button>
     </div>
@@ -557,12 +559,13 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     localStorage.removeItem(STORE + "-probe");
   } catch (e) { storageOK = false; }
 
-  const save = () => {
+  const save = noCloud => {
     if (viewOnly || !workspace) return;         // בתצוגת לקוח לא דורסים את הפרויקט שלו
     state.updatedAt = new Date().toISOString();
     state._seq = seq;
     if (storageOK) { try { localStorage.setItem(STORE, JSON.stringify(workspace)); } catch (e) { storageOK = false; } }
     queueFileSave();
+    if (noCloud !== true) queueCloudSync(state);   // פרויקט משותף: כל שינוי נשמר גם בענן
   };
 
   /* ---------- scheduling ---------- */
@@ -1077,7 +1080,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
         class="h-8 max-w-[200px] px-3 rounded-lg text-xs font-medium border transition truncate ${
           on ? "bg-indigo-600 border-indigo-600 text-white shadow-sm shadow-indigo-200"
              : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}">
-        ${esc(p.name || "ללא שם")}<span class="${on ? "text-indigo-200" : "text-slate-400"}"> · ${n}</span>
+        ${p.shareId ? '<span title="משותף עם לקוח">🔗 </span>' : ""}${esc(p.name || "ללא שם")}<span class="${on ? "text-indigo-200" : "text-slate-400"}"> · ${n}</span>
       </button>`;
     }).join("");
     $("btnDelProject").disabled = workspace.projects.length <= 1;
@@ -1257,6 +1260,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
   $("btnDupProject").addEventListener("click", () => {
     save();
     const copy = fixProject(JSON.parse(JSON.stringify(state)));
+    delete copy.shareId;                              // העותק אינו משותף — אחרת שני פרויקטים יכתבו לאותו קישור
     copy.id = newProjectId();
     let base = (state.name || "פרויקט") + " — עותק", name = base, k = 2;
     while (workspace.projects.some(p => p.name === name)) name = `${base} ${k++}`;
@@ -2287,14 +2291,75 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     }
   };
 
-  async function encodeShare() {
-    const one = Object.assign({}, state); delete one._seq;      // הקישור נושא רק את הפרויקט הפעיל
-    const raw = new TextEncoder().encode(JSON.stringify({ v: 1, app: "mini-gantt", at: new Date().toISOString(), data: one }));
-    if (typeof CompressionStream === "function") {
-      const cs = new Blob([raw]).stream().pipeThrough(new CompressionStream("deflate-raw"));
-      return "z" + b64u.enc(new Uint8Array(await new Response(cs).arrayBuffer()));
+  /* ---------- שיתוף בענן: קישור קצר וקבוע שמתעדכן ---------- */
+  const PW_KEY = STORE + "-pw";
+  const cloudAvailable = () => location.protocol === "http:" || location.protocol === "https:";
+  const getPw = () => { try { return localStorage.getItem(PW_KEY) || ""; } catch (e) { return ""; } };
+  const setPw = v => { try { v ? localStorage.setItem(PW_KEY, v) : localStorage.removeItem(PW_KEY); } catch (e) {} };
+
+  async function api(method, path, body) {
+    const r = await fetch(path, {
+      method, cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    let json = null;
+    try { json = await r.json(); } catch (e) { /* ignore */ }
+    return { ok: r.ok, status: r.status, json };
+  }
+
+  /** שואל סיסמה בחלון הכניסה הקיים (ללא כניסה למצב עריכה) ומחזיר את מה שהוקלד, או null */
+  let loginResolve = null;
+  function askPassword(title) {
+    return new Promise(resolve => { loginResolve = resolve; openLogin(title); });
+  }
+
+  /** הפרויקט כפי שנשמר בענן — בלי שדות פנימיים */
+  function cloudData(proj) {
+    const o = JSON.parse(JSON.stringify(proj));
+    delete o._seq; delete o.shareId;
+    return o;
+  }
+
+  let lastSync = null, syncFailShown = false;
+
+  /** שומר פרויקט בענן (יוצר קישור אם עדיין אין). interactive=true רשאי לבקש סיסמה. מחזיר את מזהה הקישור */
+  async function pushShare(proj, interactive) {
+    if (!cloudAvailable()) throw new Error("שיתוף בענן זמין רק באתר המותקן, לא בפתיחה מקובץ מקומי");
+    let pw = getPw();
+    if (!pw) {
+      if (!interactive) return null;
+      pw = await askPassword("אימות סיסמה לשיתוף");
+      if (!pw) return null;
     }
-    return "p" + b64u.enc(raw);                      // ללא דחיסה — קישור ארוך יותר אך תקין
+    const r = await api("POST", "/api/share", { id: proj.shareId || undefined, data: cloudData(proj), password: pw });
+    if (r.status === 401) { setPw(""); throw new Error("הסיסמה שגויה"); }
+    if (r.status === 503) throw new Error("השיתוף בענן עדיין לא הוגדר בשרת (חסרה סיסמת עריכה)");
+    if (r.status === 413) throw new Error("הפרויקט גדול מדי לשיתוף");
+    if (!r.ok || !r.json || !r.json.id) throw new Error("השמירה בענן נכשלה");
+    setPw(pw);
+    if (proj.shareId !== r.json.id) {
+      proj.shareId = r.json.id;
+      if (proj === state) save(true); else { try { localStorage.setItem(STORE, JSON.stringify(workspace)); } catch (e) {} }
+      renderProjects();
+    }
+    lastSync = new Date();
+    syncFailShown = false;
+    return r.json.id;
+  }
+
+  /** שמירה אוטומטית של פרויקט משותף, מרוכזת לפי פרויקט כדי לא להציף את השרת */
+  const syncTimers = new Map();
+  function queueCloudSync(proj) {
+    if (!proj || !proj.shareId || viewOnly || loading || !cloudAvailable() || !getPw()) return;
+    clearTimeout(syncTimers.get(proj.id));
+    syncTimers.set(proj.id, setTimeout(async () => {
+      syncTimers.delete(proj.id);
+      try { await pushShare(proj, false); }
+      catch (e) {
+        if (!syncFailShown) { syncFailShown = true; toast(`העדכון בקישור המשותף נכשל: ${e.message}`, true); }
+      }
+    }, 1500));
   }
 
   async function decodeShare(s) {
@@ -2308,12 +2373,11 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
   }
 
   const shareModal = () => $("shareModal");
-  function openShare(url, bytes) {
+  function openShare(url) {
     $("shareUrl").value = url;
-    const kb = (bytes / 1024).toFixed(1);
-    $("shareMeta").textContent = `${state.tasks.length} משימות · אורך הקישור ${url.length.toLocaleString("he-IL")} תווים (${kb}KB)` +
-      (url.length > 8000 ? " · ארוך במיוחד — ייתכן שחלק מהאפליקציות יקצצו אותו" : "");
-    $("shareMeta").className = "text-[11px] mb-3 " + (url.length > 8000 ? "text-amber-600" : "text-slate-400");
+    const t = lastSync ? ` · נשמר בענן ב-${pad(lastSync.getHours())}:${pad(lastSync.getMinutes())}` : "";
+    $("shareMeta").textContent = `${state.tasks.length} משימות${t}`;
+    $("shareMeta").className = "text-[11px] mb-3 text-slate-400";
     shareModal().classList.remove("hidden");
     shareModal().classList.add("flex");
     $("shareUrl").select();
@@ -2322,11 +2386,32 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
 
   $("btnShare").addEventListener("click", async () => {
     if (!state.tasks.length) { toast("אין משימות לשיתוף", true); return; }
+    const btn = $("btnShare");
+    btn.disabled = true;
     try {
-      const payload = await encodeShare();
-      const url = location.href.split("#")[0] + "#v=" + payload;
-      openShare(url, payload.length);
-    } catch (e) { toast("יצירת הקישור נכשלה", true); }
+      const id = await pushShare(state, true);
+      if (!id) return;
+      openShare(location.href.split("#")[0] + "#s=" + id);
+    } catch (e) { toast(e.message || "יצירת הקישור נכשלה", true); }
+    finally { btn.disabled = false; }
+  });
+
+  $("btnStopShare").addEventListener("click", async () => {
+    const id = state.shareId;
+    if (!id) { closeShare(); return; }
+    if (!confirm("להפסיק את השיתוף? הקישור יפסיק לעבוד לכל מי ששלחת לו.")) return;
+    const pw = getPw() || await askPassword("אימות סיסמה");
+    if (!pw) return;
+    try {
+      const r = await api("DELETE", "/api/share", { id, password: pw });
+      if (r.status === 401) { setPw(""); toast("הסיסמה שגויה", true); return; }
+      if (!r.ok) { toast("ההפסקה נכשלה", true); return; }
+    } catch (e) { toast("ההפסקה נכשלה", true); return; }
+    delete state.shareId;
+    save(true);
+    renderProjects();
+    closeShare();
+    toast("השיתוף הופסק");
   });
 
   $("btnCopyShare").addEventListener("click", async () => {
@@ -2353,7 +2438,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
     const at = obj.at ? new Date(obj.at) : null;
     $("viewTitle").textContent = "תצוגה בלבד";
     $("viewMeta").textContent = (state.name ? state.name + " · " : "") +
-      (at && !isNaN(at) ? `עודכן ב-${at.getDate()}/${at.getMonth() + 1}/${at.getFullYear()}` : "");
+      (at && !isNaN(at) ? `עודכן ב-${at.getDate()}/${at.getMonth() + 1}/${at.getFullYear()} ${pad(at.getHours())}:${pad(at.getMinutes())}` : "");
     showBanner();
     syncSettings();
     renderAll();
@@ -2408,23 +2493,47 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
   }
 
   const loginModal = () => $("loginModal");
-  function openLogin() {
+  function openLogin(title) {
+    $("loginTitle").textContent = typeof title === "string" ? title : "כניסה לעריכה";
     $("loginPass").value = "";
     $("loginErr").classList.add("hidden");
     loginModal().classList.remove("hidden");
     loginModal().classList.add("flex");
     setTimeout(() => $("loginPass").focus(), 30);
   }
-  const closeLogin = () => { loginModal().classList.add("hidden"); loginModal().classList.remove("flex"); };
+  const closeLogin = () => {
+    loginModal().classList.add("hidden"); loginModal().classList.remove("flex");
+    if (loginResolve) { const r = loginResolve; loginResolve = null; r(null); }   // בוטל — בקשת הסיסמה נענית ב-null
+  };
 
-  $("btnUnlock").addEventListener("click", openLogin);
+  $("btnUnlock").addEventListener("click", () => openLogin());
   $("btnCloseLogin").addEventListener("click", closeLogin);
   loginModal().addEventListener("click", e => { if (e.target === loginModal()) closeLogin(); });
 
   $("loginForm").addEventListener("submit", async e => {
     e.preventDefault();
-    const ok = await sha256($("loginPass").value) === EDIT_HASH;
+    const pw = $("loginPass").value;
+
+    /* מצב "בקשת סיסמה" (לשיתוף/הפסקת שיתוף): רק מחזירים את מה שהוקלד */
+    if (loginResolve) {
+      const done = loginResolve; loginResolve = null;
+      closeLogin();
+      done(pw);
+      return;
+    }
+
+    /* באתר המותקן הסיסמה נבדקת בשרת. אם השרת לא זמין או לא הוגדר — בודקים מקומית */
+    let ok = null, serverOk = false;
+    if (cloudAvailable()) {
+      try {
+        const r = await api("POST", "/api/auth", { password: pw });
+        if (r.status === 200) { ok = true; serverOk = true; }
+        else if (r.status === 401) ok = false;
+      } catch (err) { /* נפילה לבדיקה מקומית */ }
+    }
+    if (ok === null) ok = await sha256(pw) === EDIT_HASH;
     if (!ok) { $("loginErr").classList.remove("hidden"); $("loginPass").select(); return; }
+    if (serverOk) setPw(pw);                      // נדרש לשמירה אוטומטית של פרויקטים משותפים
     closeLogin();
     unlockNow(true);
     toast("מצב עריכה פעיל");
@@ -2434,6 +2543,7 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
   const passModal = () => $("passModal");
   $("btnLock").addEventListener("click", () => {
     try { localStorage.removeItem(UNLOCK_KEY); } catch (e) {}
+    setPw("");
     location.reload();
   });
   $("btnChangePass").addEventListener("click", () => {
@@ -2460,8 +2570,52 @@ tailwind.config = { theme: { extend: { fontFamily: { sans: ['Heebo','system-ui',
   /* מעבר בין קישור שיתוף לכתובת הרגילה הוא ניווט באותו דף — צריך אתחול מחדש */
   window.addEventListener("hashchange", () => location.reload());
 
+  /* צופה בקישור קצר: טוען את הגרסה העדכנית מהענן ומרענן אותה מדי פעם */
+  async function fetchShare(id) {
+    const r = await fetch(`/api/share?id=${encodeURIComponent(id)}`, { cache: "no-store" });
+    if (!r.ok) return r.status === 404 ? "gone" : null;
+    return await r.json();
+  }
+
+  async function enterCloudView(id) {
+    viewOnly = true;
+    document.body.classList.add("viewonly");
+    $("viewTitle").textContent = "טוען…";
+    $("viewMeta").textContent = "";
+    showBanner();
+
+    let obj = null;
+    try { obj = await fetchShare(id); } catch (e) { /* ignore */ }
+    if (!obj || obj === "gone" || !obj.data || !Array.isArray(obj.data.tasks)) {
+      $("viewTitle").textContent = obj === null ? "לא ניתן לטעון את הגאנט" : "הקישור לא נמצא";
+      $("viewMeta").textContent = obj === null ? "בדקו את החיבור לאינטרנט ורעננו את הדף." : "ייתכן שהשיתוף הופסק. פנו לשולח הקישור.";
+      return;
+    }
+    let lastAt = obj.at;
+    enterViewMode(obj);
+
+    const poll = async () => {
+      if (document.hidden) return;
+      try {
+        const n = await fetchShare(id);
+        if (n && n !== "gone" && n.data && n.at !== lastAt) {
+          lastAt = n.at;
+          enterViewMode(n);
+          toast("הגאנט עודכן");
+        } else if (n === "gone") {
+          $("viewTitle").textContent = "השיתוף הופסק";
+        }
+      } catch (e) { /* ננסה שוב בסבב הבא */ }
+    };
+    setInterval(poll, 30000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+  }
+
   /* ---------- init ---------- */
   (async function boot() {
+    const sm = location.hash.match(/^#s=([a-z0-9]{6,20})$/);
+    if (sm) { await enterCloudView(sm[1]); return; }
+
     const m = location.hash.match(/^#v=(.+)$/);
     if (m) {
       try {
